@@ -23,7 +23,7 @@ export default function Login() {
       {/* Background decoration */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <div className="absolute -top-40 -right-40 w-96 h-96 bg-primary-600/10 dark:bg-primary-600/10 rounded-full blur-3xl" />
-        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-indigo-200 dark:bg-indigo-900/20 rounded-full blur-3xl opacity-50" />
+        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-primary-200 dark:bg-primary-900/20 rounded-full blur-3xl opacity-50" />
       </div>
 
       <div className="glass-card p-8 w-full max-w-md relative animate-fade-in">

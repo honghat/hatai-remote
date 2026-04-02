@@ -101,7 +101,7 @@ function SkillCard({ skill, onEdit, onDelete, onToggle, onReload, onTest }) {
             {skill.tool_name}
           </span>
           {skill.parameters && (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-500/10 text-indigo-500 rounded-xl text-xs font-bold">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary-500/10 text-primary-500 rounded-xl text-xs font-bold">
               <Tag size={12} />
               {'{' + skill.parameters + '}'}
             </span>
@@ -426,7 +426,7 @@ const CATEGORY_CONFIG = {
   DESKTOP: { icon: Monitor, color: 'text-purple-500', bg: 'bg-purple-500/10', label: 'Desktop' },
   AI_CODING: { icon: Code2, color: 'text-emerald-500', bg: 'bg-emerald-500/10', label: 'AI Coding' },
   MEMORY: { icon: Brain, color: 'text-pink-500', bg: 'bg-pink-500/10', label: 'Memory' },
-  SOCIAL: { icon: MessageCircle, color: 'text-indigo-500', bg: 'bg-indigo-500/10', label: 'Social' },
+  SOCIAL: { icon: MessageCircle, color: 'text-primary-500', bg: 'bg-primary-500/10', label: 'Social' },
   OTHER: { icon: Wrench, color: 'text-slate-400', bg: 'bg-slate-500/10', label: 'Other' },
   OFFICE: { icon: FileCode2, color: 'text-orange-500', bg: 'bg-orange-500/10', label: 'Office Suite' },
   PDF: { icon: FileCode2, color: 'text-red-500', bg: 'bg-red-500/10', label: 'PDF' },
@@ -528,8 +528,8 @@ function BuiltinToolsSection() {
       <div className="p-8 pb-4">
         <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-6 mb-8">
           <div className="flex items-center gap-5">
-            <div className="p-4 rounded-[1.5rem] bg-indigo-500/10 shadow-lg shadow-indigo-500/5">
-              <Box size={24} className="text-indigo-500" />
+            <div className="p-4 rounded-[1.5rem] bg-primary-500/10 shadow-lg shadow-primary-500/5">
+              <Box size={24} className="text-primary-500" />
             </div>
             <div>
               <h3 className="text-xl font-black text-light-900 dark:text-white tracking-tight">Công cụ Tích hợp</h3>

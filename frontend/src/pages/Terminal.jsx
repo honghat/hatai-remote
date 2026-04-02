@@ -138,7 +138,7 @@ export default function TerminalPage() {
     // WebSocket
     const token = localStorage.getItem('hatai_token')
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${wsProtocol}//${window.location.host}/api/ssh/ws/${conn.id}?token=${token}`
+    const wsUrl = `${wsProtocol}//${window.location.hostname}:8000/ssh/ws/${conn.id}?token=${token}`
 
     const ws = new WebSocket(wsUrl)
     wsRef.current = ws

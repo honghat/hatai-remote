@@ -35,7 +35,7 @@ class DaemonCommand:
     message: str = ""
     session_id: Optional[int] = None
     user_id: Optional[int] = None
-    max_tokens: int = 8192
+    max_tokens: int = 18192
     temperature: float = 0.5
     metadata: Dict[str, Any] = field(default_factory=dict)
 

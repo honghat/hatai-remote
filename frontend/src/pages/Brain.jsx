@@ -14,7 +14,7 @@ function Card({ children, className = "", title, icon: Icon, color = "primary", 
   const colors = {
     primary: "from-primary-500/10 to-transparent border-primary-500/20 text-primary-500 bg-primary-500/5",
     pink: "from-pink-500/10 to-transparent border-pink-500/20 text-pink-500 bg-pink-500/5",
-    indigo: "from-indigo-500/10 to-transparent border-indigo-500/20 text-indigo-500 bg-indigo-500/5",
+    primary: "from-primary-500/10 to-transparent border-primary-500/20 text-primary-500 bg-primary-500/5",
     orange: "from-orange-500/10 to-transparent border-orange-500/20 text-orange-500 bg-orange-500/5",
     blue: "from-blue-500/10 to-transparent border-blue-500/20 text-blue-500 bg-blue-500/5"
   }
@@ -173,7 +173,7 @@ function TeachModal({ onClose, onTeach }) {
   const categories = [
     { key: 'soul', label: 'Personality', desc: 'Core behaviors', icon: Heart, color: 'text-pink-500' },
     { key: 'knowledge', label: 'Knowledge', desc: 'Facts & data', icon: Database, color: 'text-blue-500' },
-    { key: 'preference', label: 'Preference', desc: 'User habits', icon: User, color: 'text-indigo-500' },
+    { key: 'preference', label: 'Preference', desc: 'User habits', icon: User, color: 'text-primary-500' },
   ]
 
   return (
@@ -355,7 +355,7 @@ export default function Brain() {
       {/* Dynamic Header */}
       <div className="relative">
         <div className="absolute -top-24 -left-24 w-96 h-96 bg-primary-500/10 blur-[120px] rounded-full pointer-events-none" />
-        <div className="absolute -bottom-24 -right-24 w-96 h-96 bg-indigo-500/10 blur-[120px] rounded-full pointer-events-none" />
+        <div className="absolute -bottom-24 -right-24 w-96 h-96 bg-primary-500/10 blur-[120px] rounded-full pointer-events-none" />
         
         <div className="relative flex flex-col xl:flex-row xl:items-center justify-between gap-8 pb-10">
           <div className="flex items-center gap-8">
@@ -395,7 +395,7 @@ export default function Brain() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 animate-fade-in">
           <StatTile label="Knowledge Chunks" value={totalKnowledge} icon={Database} colorClass="text-blue-500" />
           <StatTile label="Personality State" value={b.soul?.content ? 'DEFINED' : 'VACUUM'} icon={Heart} colorClass="text-pink-500" />
-          <StatTile label="Preferences" value={Object.keys(b.preferences || {}).length} icon={User} colorClass="text-indigo-500" />
+          <StatTile label="Preferences" value={Object.keys(b.preferences || {}).length} icon={User} colorClass="text-primary-500" />
           <StatTile label="Scratchpad Load" value={`${b.scratchpad?.size || 0} bytes`} icon={Cpu} colorClass="text-orange-500" />
         </div>
       </div>
@@ -473,18 +473,18 @@ export default function Brain() {
              </Card>
              */}
 
-             <Card title="Hardware Insights" icon={Cpu} color="indigo" isOpen={openSections.preferences} onToggle={() => toggleSection('preferences')}>
+             <Card title="Hardware Insights" icon={Cpu} color="primary" isOpen={openSections.preferences} onToggle={() => toggleSection('preferences')}>
                 <div className="space-y-4 mt-2">
                    <div className="grid grid-cols-1 gap-4">
-                      <div className="flex items-center justify-between p-4 bg-indigo-500/5 border border-indigo-500/10 rounded-2xl">
+                      <div className="flex items-center justify-between p-4 bg-primary-500/5 border border-primary-500/10 rounded-2xl">
                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-indigo-500/10 rounded-xl flex items-center justify-center text-indigo-500"><Activity size={18}/></div>
+                            <div className="w-10 h-10 bg-primary-500/10 rounded-xl flex items-center justify-center text-primary-500"><Activity size={18}/></div>
                             <div>
                                <p className="text-[11px] font-black text-light-900 dark:text-white tracking-widest uppercase">Memory Utilization</p>
                                <p className="text-[10px] text-light-400 dark:text-slate-500 font-bold">Real-time neural load</p>
                             </div>
                          </div>
-                         <p className="text-lg font-black text-indigo-500 tracking-tighter">84%</p>
+                         <p className="text-lg font-black text-primary-500 tracking-tighter">84%</p>
                       </div>
                       <div className="flex items-center justify-between p-4 bg-primary-500/5 border border-primary-500/10 rounded-2xl">
                          <div className="flex items-center gap-3">
@@ -541,26 +541,26 @@ export default function Brain() {
           <Card 
             title="Active Preferences" 
             icon={User} 
-            color="indigo" 
+            color="primary" 
             isOpen={openSections.preferences}
             onToggle={() => toggleSection('preferences')}
           >
              <div className="space-y-4 mt-2">
                 {Object.entries(b.preferences || {}).filter(([k]) => !k.startsWith('_')).length > 0 ? (
                   Object.entries(b.preferences || {}).filter(([k]) => !k.startsWith('_')).map(([k, v], i) => (
-                    <div key={k} className="group relative p-5 bg-[#F8FAFC] dark:bg-dark-950/40 border border-light-200 dark:border-slate-800/60 rounded-[1.5rem] hover:border-indigo-500/50 transition-all duration-300">
+                    <div key={k} className="group relative p-5 bg-[#F8FAFC] dark:bg-dark-950/40 border border-light-200 dark:border-slate-800/60 rounded-[1.5rem] hover:border-primary-500/50 transition-all duration-300">
                         <div className="flex items-center justify-between mb-2">
-                           <span className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.2em]">{k}</span>
+                           <span className="text-[10px] font-black text-primary-500 uppercase tracking-[0.2em]">{k}</span>
                            <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all">
-                              <button onClick={() => setEditingPreference({key: k, value: v})} className="p-1.5 text-indigo-400 hover:text-indigo-600 transition-colors"><Edit3 size={14}/></button>
+                              <button onClick={() => setEditingPreference({key: k, value: v})} className="p-1.5 text-primary-400 hover:text-primary-600 transition-colors"><Edit3 size={14}/></button>
                               <button onClick={() => deletePreference(k)} className="p-1.5 text-red-300 hover:text-red-500 transition-colors"><Trash2 size={14}/></button>
                            </div>
                         </div>
                         {editingPreference?.key === k ? (
                            <div className="flex gap-2 mt-2 animate-slide-in">
                               <input value={editingPreference.value} onChange={e => setEditingPreference({...editingPreference, value: e.target.value})}
-                                 className="flex-1 bg-white dark:bg-dark-900 border border-indigo-500/50 rounded-xl px-4 py-2 text-xs text-light-900 dark:text-white outline-none focus:ring-2 ring-indigo-500/10 shadow-inner" />
-                              <button onClick={() => savePreference(editingPreference.key, editingPreference.value)} className="bg-indigo-600 text-white p-2 rounded-xl hover:bg-indigo-500 shadow-lg shadow-indigo-600/20 transition-all"><CheckCircle2 size={16}/></button>
+                                 className="flex-1 bg-white dark:bg-dark-900 border border-primary-500/50 rounded-xl px-4 py-2 text-xs text-light-900 dark:text-white outline-none focus:ring-2 ring-primary-500/10 shadow-inner" />
+                              <button onClick={() => savePreference(editingPreference.key, editingPreference.value)} className="bg-primary-600 text-white p-2 rounded-xl hover:bg-primary-500 shadow-lg shadow-primary-600/20 transition-all"><CheckCircle2 size={16}/></button>
                               <button onClick={() => setEditingPreference(null)} className="text-light-400 p-2"><X size={16}/></button>
                            </div>
                         ) : (

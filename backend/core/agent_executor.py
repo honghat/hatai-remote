@@ -140,16 +140,40 @@ def build_system_prompt(user_query: str = "", session_id: int = None) -> str:
     import datetime
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:00")
 
+    # 6. Project Context (CWD and Root)
+    cwd = os.getcwd()
+    project_root = cwd
+    # Try to find a .git folder or workspace marker to define project root
+    temp_root = cwd
+    for _ in range(3):
+        if os.path.exists(os.path.join(temp_root, ".git")) or os.path.exists(os.path.join(temp_root, "package.json")):
+            project_root = temp_root
+            break
+        parent = os.path.dirname(temp_root)
+        if parent == temp_root: break
+        temp_root = parent
+
+    project_context = f"""
+# Project Context
+- **Current Working Directory (CWD)**: `{cwd}`
+- **Project Root**: `{project_root}`
+- **IMPORTANT**: ALWAYS use paths relative to the Project Root or CWD. Do NOT use absolute paths starting with `//` or `/Users/...` unless explicitly instructed.
+- If you are building a new feature, ensure files are placed in their correct semantic directories (e.g., `backend/core/`, `frontend/src/components/`).
+"""
+
     return f"""You are HatAI Agent — an advanced AI assistant running on macOS. Current time: {now_str}.
+{project_context}
 
 # How to think
-For complex tasks (searching, browsing, system actions), reason step-by-step inside <think>...</think> tags before acting.
-Focus on the next tool you will use and why.
-For simple conversation or greetings, you may respond directly without reasoning tags.
-Do not stutter or repeat words. Provide the final response in Vietnamese.
+- ALWAYS start your response with a <think> block (or <thought>).
+- For complex tasks (searching, browsing, system actions), reason step-by-step.
+- For simple greetings, use a VERY BRIEF thinking block just to acknowledge the intent.
+- Do NOT stutter, repeat words, or leak your internal monologue into the final response.
+- Provide the final response in Vietnamese.
+- If you were previously "lost" in the wrong directory, use `project_tree` or `list_dir` to re-orient yourself in the current project root.
 
 # How to use tools
-Call tools using this exact format:
+- Call tools using this exact format:
 ```tool
 {{"tool": "tool_name", "args": {{"key": "value"}}}}
 ```
@@ -165,7 +189,8 @@ Call tools using this exact format:
 # Internal Reasoning (Thinking)
 - ALWAYS start your response with a `<think>` block (or `<thought>`).
 - Use this block to analyze the user's intent, plan your strategy, and evaluate tool results.
-- **Be DETAILED**: Your thinking should show your logical chain of thought. Don't just list tools; explain WHY you are choosing them and what you expect to find.
+- **Be DETAILED** for complex tasks: Show your logical chain of thought.
+- **Be BRIEF** for greetings: Just 1-2 sentences of internal context.
 - The user can see this thinking process in the UI, so use it to provide transparency on complex tasks.
 - If a tool fails, use the thinking block to figure out a better alternative.
 
@@ -201,18 +226,18 @@ Call tools using this exact format:
 
 # Professional Coding (CRITICAL for code tasks)
 - **READ BEFORE EDIT**: ALWAYS use `read_file` with `start_line`/`end_line` to read the specific section BEFORE editing. Never edit blind.
-- **Precise Edits**: Use `edit_file{path,old_text,new_text}` for single edits. Use `multi_edit_file{path,edits}` for multiple non-contiguous changes in one file.
+- **Precise Edits**: Use `edit_file{{path,old_text,new_text}}` for single edits. Use `multi_edit_file{{path,edits}}` for multiple non-contiguous changes in one file.
 - **Verify After Edit**: After editing, use `read_file` to verify the change was applied correctly. If it broke syntax, fix immediately.
-- **Project Overview**: Use `project_tree{path,depth}` to understand file structure before diving into code.
-- **Search First**: Use `search_code{query,path}` to find where code is defined before modifying it. Don't guess file locations.
+- **Project Overview**: Use `project_tree{{path,depth}}` to understand file structure before diving into code.
+- **Search First**: Use `search_code{{query,path}}` to find where code is defined before modifying it. Don't guess file locations.
 - **Git Workflow**: Use `git_ops` for version control:
-  - `git_ops{action:"status"}` — check current state
-  - `git_ops{action:"diff",file:"path"}` — review changes before committing  
-  - `git_ops{action:"commit",message:"desc"}` — commit with clear message
-  - `git_ops{action:"push"}` — push to remote
-  - `git_ops{action:"log",n:5}` — check recent history
+  - `git_ops{{action:"status"}}` — check current state
+  - `git_ops{{action:"diff",file:"path"}}` — review changes before committing  
+  - `git_ops{{action:"commit",message:"desc"}}` — commit with clear message
+  - `git_ops{{action:"push"}}` — push to remote
+  - `git_ops{{action:"log",n:5}}` — check recent history
 - **Line Numbers Matter**: When reading code, use line ranges to focus on relevant sections. Don't read entire large files.
-- **Create Files**: Use `write_file{path,content}` to create new files. Create parent directories automatically.
+- **Create Files**: Use `write_file{{path,content}}` to create new files. Create parent directories automatically.
 - **Run & Test**: After code changes, use `run_command` to test (e.g., `python -c "import module"`, `node -e "require('./file')"`, `npm run build`).
 - **Error Recovery**: If an edit fails (old_text not found), read the file again to see current content, then retry with correct text.
 
@@ -876,6 +901,7 @@ def run_agent(user_message, history=None, max_tokens=4096, temperature=0.5, canc
         return
 
     try:
+        messages = []  # Initialize to avoid UnboundLocalError in finally block
         def _cancelled():
             return cancel_event is not None and cancel_event.is_set()
 
@@ -1084,7 +1110,8 @@ Execute step 1 NOW. Call the tool."""
                         else:
                             full_thinking = full_thinking.rstrip() + "\n\n" + part
                 
-                yield {"type": "thinking", "content": full_thinking}
+                # Logic for full_thinking omitted here to avoid redundancy with thinking_tokens
+                # yield {"type": "thinking", "content": full_thinking}
                 # Xóa tất cả thẻ thinking khỏi response
                 clean = re.sub(r'<(?:think|thought)>.*?</(?:think|thought)>', '', resp, flags=re.DOTALL).strip()
             else:
@@ -1094,10 +1121,7 @@ Execute step 1 NOW. Call the tool."""
 
             if t_calls:
                 malformed_count = 0  # reset on successful parse
-                split_at = "```"
-                pre = clean.split(split_at)[0].strip() if split_at in clean else clean[:100].strip()
-                if pre:
-                    yield {"type": "text", "content": pre}
+                # No need to yield 'pre' text here because it was already yielded as deltas during chat_stream
 
                 messages.append({"role": "assistant", "content": resp})
                 results_text = []
@@ -1260,7 +1284,7 @@ Execute step 1 NOW. Call the tool."""
                     "hoàn thành", "đã xong", "đã hoàn tất", "tổng kết", "kết quả",
                     "done", "completed", "finished", "summary", "all done",
                     "task complete", "successfully completed",
-                    "chào bạn", "xin chào", "tạm biệt", "vâng", "được rồi",
+                    "chào", "chào bạn", "xin chào", "tạm biệt", "vâng", "được rồi",
                     "đã mở", "đã chạy", "đã thực hiện", "thành công"
                 ]
                 # Refusal signals — model claims it can't do something. Must override.
@@ -1291,8 +1315,9 @@ Execute step 1 NOW. Call the tool."""
                     messages.append({"role": "user", "content": f"[System] You DO have tools (browser, system, search). Do NOT refuse. Use your tools NOW.\nExample:\n```tool\n{example}\n```"})
                     continue
 
-                if clean:
-                    yield {"type": "text", "content": clean}
+                # No need to yield 'clean' here because it was already yielded as deltas during chat_stream
+                # if clean:
+                #     yield {"type": "text", "content": clean}
 
                 # Comprehensive completion check
                 is_actually_done = (is_final_signal or not plan_steps) and not has_pending_steps
@@ -1300,13 +1325,28 @@ Execute step 1 NOW. Call the tool."""
                     yield {"type": "done"}
                     return
                 else:
+                    # CONVERSATIONAL CHECK: If no tools were used and no plan exists,
+                    # it was probably a conversational turn. Stop now to avoid loops.
+                    if not plan_steps and not any(t.role == "assistant" and "```tool" in t.content for t in messages[-2:]):
+                        logger.info("💬 Conversational turn finished. Yielding done.")
+                        yield {"type": "done"}
+                        return
+
+                    # SMART NUDGE: If the last message in history is a 'tool' result,
+                    # we don't need a heavy "[System]" nudge, just a simple continuation.
+                    is_last_tool = messages and messages[-1].get("role") == "tool"
+                    
                     if has_pending_steps:
-                        nudge = f"[System] {current_step}/{len(plan_steps)} steps done. Proceed to Step {current_step+1}: {plan_steps[current_step]}. Execute now."
+                        nudge = f"[System] Step {current_step}/{len(plan_steps)} result received. Proceed to Step {current_step+1}: {plan_steps[current_step]}."
+                    elif is_last_tool:
+                        # If we just got a tool result but no plan, just ask for the next logical step OR summary.
+                        nudge = "[System] Result received. Continue to next action or provide final summary in Vietnamese."
                     else:
                         nudge = "[System] Task appears incomplete. If finished, provide final summary in Vietnamese. If not, continue the logic flow."
                     
-                    logger.info(f"⏩ Auto-nudging agent... (pending={has_pending_steps})")
-                    messages.append({"role": "assistant", "content": resp})
+                    logger.info(f"⏩ Auto-nudging agent... (pending={has_pending_steps}, last_is_tool={is_last_tool})")
+                    if resp.strip():
+                        messages.append({"role": "assistant", "content": resp})
                     messages.append({"role": "user", "content": nudge})
                     continue
 
@@ -1335,13 +1375,24 @@ def stringify_agent_event(event: Dict[str, Any]) -> str:
     etype = event.get("type")
     
     if etype == "thinking":
-        return f"\n<think>\n{event.get('content', '')}\n</think>\n"
+        content = event.get('content', '').strip()
+        if not content: return ""
+        return f"\n<think>\n{content}\n</think>\n"
     elif etype == "thinking_token":
-        return event.get("content", "")
+        content = event.get("content", "")
+        # Avoid leaking raw thinking tags if they are already being streamed individually
+        return content.replace("<think>", "").replace("</think>", "").replace("<thought>", "").replace("</thought>", "")
     elif etype == "tool_call":
         tool = event.get("tool", "unknown")
-        args = json.dumps(event.get("args", {}), ensure_ascii=False)
-        return f"\n🔧 **{tool}**({args})\n"
+        # Ensure arguments are treated as a dict
+        args_obj = event.get("args", {})
+        if isinstance(args_obj, str):
+            # Try to fix "loose" string args
+            try: args_obj = json.loads(args_obj)
+            except: args_obj = {"raw": args_obj}
+        
+        args_str = json.dumps(args_obj, ensure_ascii=False)
+        return f"\n🔧 **{tool}**({args_str})\n"
     elif etype == "tool_result":
         tool = event.get("tool", "unknown")
         result = event.get("result", "")
@@ -1350,15 +1401,16 @@ def stringify_agent_event(event: Dict[str, Any]) -> str:
             clean = {k: v for k, v in result.items()
                      if k not in ("base64", "_frontend_screenshot", "_frontend_screenshot_path")
                      and not (isinstance(v, str) and len(v) > 500 and v[:20].replace('+', '').replace('/', '').replace('=', '').isalnum())}
-            result = json.dumps(clean, ensure_ascii=False, default=str)
+            result_str = json.dumps(clean, ensure_ascii=False, default=str)
         elif isinstance(result, list):
-            result = json.dumps(result, ensure_ascii=False, default=str)
+            result_str = json.dumps(result, ensure_ascii=False, default=str)
         else:
-            result = str(result)
-        # Truncate extremely long results to prevent DB bloat
-        if len(result) > 3000:
-            result = result[:3000] + "... [truncated]"
-        return f"📤 **Result ({tool})**: {result}\n"
+            result_str = str(result)
+            
+        # Truncate extremely long results to prevent DB/Frontend bloat
+        if len(result_str) > 4000:
+            result_str = result_str[:4000] + "... [truncated]"
+        return f"\n📤 **Result ({tool})**: {result_str}\n"
     elif etype == "screenshot":
         path = event.get("path", "")
         return f"\n📸 Screenshot: {path}\n"

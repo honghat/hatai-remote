@@ -45,63 +45,65 @@ function parseEventsFromContent(content) {
   const events = [];
   let lastIndex = 0;
 
-  // Regex match các block đặc biệt (dùng /gs để hỗ trợ multiline tốt hơn)
-  const blockRegex = /(<(?:think|thought)>[\s\S]*?<\/(?:think|thought)>)|(\n🔧 \*\*.*?\*\*\(.*?\)\n)|(\n📤 \*\*Result \(.*?\)\*\*: [\s\S]*?(?=\n🔧|\n📤 \*\*Result|\n📸|\n❌|$))|(\n📸 Screenshot: .*?(?=\n|$))|(\n❌ \*\*Error\*\*: .*?(?=\n|$))/gs;
+  // Cải tiến Regex để bắt được cả những tool call "nát" hoặc dính liền
+  // 1. Thinking block: <think>...</think>
+  // 2. Tool call: 🔧 **tool**(JSON)
+  // 3. Tool result: 📤 **Result (tool)**: JSON
+  // 4. Screenshot: 📸 Screenshot: path
+  // 5. Error: ❌ **Error**: content
+  // 6. Markdown tool block: ```tool ... ```
+  const blockRegex = /(<(?:think|thought)>[\s\S]*?<\/(?:think|thought)>)|(🔧 \*\*.*?\*\*\(.*?\))|(📤 \*\*Result \(.*?\)\*\*: [\s\S]*?(?=\n?🔧|\n?📤 \*\*Result|\n?📸|\n?❌|$))|(\n?📸 Screenshot: .*?(?=\n|$))|(\n?❌ \*\*Error\*\*: .*?(?=\n|$))|(\n?```tool\s*\n?([\s\S]*?)\n?```)/gs;
 
   let match;
   while ((match = blockRegex.exec(content)) !== null) {
     const start = match.index;
 
-    // Xử lý phần text thuần trước block (rất quan trọng để không bị cắt)
+    // Text part before block
     if (start > lastIndex) {
       const textPart = stripBase64FromText(content.slice(lastIndex, start).trim());
       if (textPart && textPart !== '[image data removed]') {
         const { thinking, answer } = parseThinking(textPart);
-        if (thinking) {
-          events.push({ type: 'thinking', content: thinking });
-        }
-        if (answer) {
-          events.push({ type: 'text', content: answer });
-        } else if (!thinking) {
-          events.push({ type: 'text', content: textPart });
-        }
+        if (thinking) events.push({ type: 'thinking', content: thinking });
+        if (answer) events.push({ type: 'text', content: answer });
+        else if (!thinking) events.push({ type: 'text', content: textPart });
       }
     }
 
-    // Xử lý từng block đặc biệt
-    if (match[1]) { // <think> block
+    if (match[1]) { // <think>
       const inner = match[1].match(/<(?:think|thought)>([\s\S]*?)(?:<\/(?:think|thought)>|$)/i);
-      if (inner && inner[1]) {
-        events.push({ type: 'thinking', content: inner[1].trim() });
-      }
+      if (inner?.[1]) events.push({ type: 'thinking', content: inner[1].trim() });
     }
-    else if (match[2]) { // Tool call
-      const toolMatch = match[2].match(/\n🔧 \*\*(.*?)\*\*\((.*?)\)\n/s);
+    else if (match[2]) { // 🔧 **tool**(JSON)
+      const toolMatch = match[2].match(/🔧 \*\*(.*?)\*\*\((.*?)\)/s);
       if (toolMatch) {
         try {
           const tool = toolMatch[1].trim();
-          const args = toolMatch[2] ? JSON.parse(toolMatch[2]) : {};
+          const argsText = toolMatch[2].trim();
+          let args = {};
+          try { 
+            args = JSON.parse(argsText); 
+          } catch {
+            // Loose parse for malformed args: "key": "value"
+            const kvMatches = argsText.matchAll(/"([^"]+)"\s*:\s*"([^"]+)"/g);
+            for (const kv of kvMatches) args[kv[1]] = kv[2];
+          }
           events.push({ type: 'tool_call', tool, args });
-        } catch {
-          events.push({ type: 'text', content: match[2].trim() });
-        }
+        } catch { events.push({ type: 'text', content: match[2].trim() }); }
       }
     }
-    else if (match[3]) { // Tool result
-      const resultMatch = match[3].match(/\n📤 \*\*Result \((.*?)\)\*\*: ([\s\S]*)/);
+    else if (match[3]) { // 📤 **Result (tool)**: JSON
+      const resultMatch = match[3].match(/📤 \*\*Result \((.*?)\)\*\*: ([\s\S]*)/);
       if (resultMatch) {
         const tool = resultMatch[1].trim();
-        let result = resultMatch[2].trim();
+        let rawResult = resultMatch[2].trim();
+        let result = rawResult;
         try {
-          if (result[0] === '{' || result[0] === '[') {
-            result = sanitizeResult(JSON.parse(result));
+          if (rawResult[0] === '{' || rawResult[0] === '[') {
+            result = sanitizeResult(JSON.parse(rawResult));
           }
         } catch { }
-        // If result is still a string, strip any inline base64
-        if (typeof result === 'string') {
-          result = stripBase64FromText(result);
-        }
-        // If this is a screenshot tool result, also extract screenshot URL from path
+        if (typeof result === 'string') result = stripBase64FromText(result);
+        
         if (typeof result === 'object' && result !== null) {
           const path = result.path || result.file_path || '';
           if (tool === 'screenshot' && path) {
@@ -112,30 +114,35 @@ function parseEventsFromContent(content) {
         events.push({ type: 'tool_result', tool, result });
       }
     }
-    else if (match[4]) { // Screenshot
-      const path = match[4].replace(/^\n📸 Screenshot: /, '').trim();
+    else if (match[4]) { // 📸 Screenshot: path
+      const path = match[4].replace(/^\n?📸 Screenshot: /, '').trim();
       const filename = path.split('/').pop();
       events.push({ type: 'screenshot', url: `/agent/screenshots/${filename}` });
     }
-    else if (match[5]) { // Error
-      const errorText = match[5].replace(/^\n❌ \*\*Error\*\*: /, '').trim();
+    else if (match[5]) { // ❌ **Error**: content
+      const errorText = match[5].replace(/^\n?❌ \*\*Error\*\*: /, '').trim();
       events.push({ type: 'error', content: errorText });
+    }
+    else if (match[6]) { // ```tool ... ```
+      try {
+        const data = JSON.parse(match[7]);
+        if (data.tool) events.push({ type: 'tool_call', tool: data.tool, args: data.args || data });
+      } catch {
+        events.push({ type: 'text', content: match[6] });
+      }
     }
 
     lastIndex = blockRegex.lastIndex;
   }
 
-  // Phần còn lại ở cuối chuỗi
+  // Handle remaining text
   if (lastIndex < content.length) {
     const remaining = stripBase64FromText(content.slice(lastIndex).trim());
     if (remaining && remaining !== '[image data removed]') {
       const { thinking, answer } = parseThinking(remaining);
       if (thinking) events.push({ type: 'thinking', content: thinking });
-      if (answer) {
-        events.push({ type: 'text', content: answer });
-      } else {
-        events.push({ type: 'text', content: remaining });
-      }
+      if (answer) events.push({ type: 'text', content: answer });
+      else events.push({ type: 'text', content: remaining });
     }
   }
 
@@ -213,14 +220,14 @@ function ThinkingBlock({ thinking, isStreaming, isThinkingComplete }) {
           onClick={() => setExpanded(!expanded)}
           className={`group flex items-center gap-3 px-4 py-2 rounded-2xl border transition-all duration-500 shadow-sm
             ${showExpanded
-              ? 'bg-indigo-600/10 border-indigo-500/30 text-indigo-700 dark:text-indigo-300 ring-4 ring-indigo-500/5'
+              ? 'bg-primary-600/10 border-primary-500/30 text-primary-700 dark:text-primary-300 ring-4 ring-primary-500/5'
               : 'bg-light-100 hover:bg-white border-light-200 text-light-500 dark:bg-slate-800/40 dark:border-slate-800/60 dark:text-slate-400 dark:hover:bg-slate-800/80 hover:shadow-md'}`}
         >
           <div className="relative">
             {isStreaming && !isThinkingComplete ? (
-              <div className="absolute -inset-1.5 bg-indigo-500/30 rounded-full animate-ping opacity-75" />
+              <div className="absolute -inset-1.5 bg-primary-500/30 rounded-full animate-ping opacity-75" />
             ) : null}
-            <div className={`p-1.5 rounded-lg ${showExpanded ? 'bg-indigo-500/20 text-indigo-600 dark:text-indigo-400' : 'bg-light-200 dark:bg-slate-700/50'}`}>
+            <div className={`p-1.5 rounded-lg ${showExpanded ? 'bg-primary-500/20 text-primary-600 dark:text-primary-400' : 'bg-light-200 dark:bg-slate-700/50'}`}>
               <BrainCircuit size={14} className={isStreaming && !isThinkingComplete ? 'animate-pulse' : ''} />
             </div>
           </div>
@@ -239,10 +246,10 @@ function ThinkingBlock({ thinking, isStreaming, isThinkingComplete }) {
         {showExpanded && (
           <div className="relative mt-3 w-full animate-slide-down">
             {/* Thread Line */}
-            <div className="absolute left-[22px] top-0 bottom-0 w-px bg-gradient-to-b from-indigo-500/40 via-indigo-500/10 to-transparent" />
+            <div className="absolute left-[22px] top-0 bottom-0 w-px bg-gradient-to-b from-primary-500/40 via-primary-500/10 to-transparent" />
             
             <div className="ml-10 py-1 pr-6">
-              <div className="bg-indigo-500/[0.03] dark:bg-indigo-500/[0.05] border border-indigo-500/10 dark:border-indigo-500/20 backdrop-blur-md rounded-3xl p-5 shadow-inner">
+              <div className="bg-primary-500/[0.03] dark:bg-primary-500/[0.05] border border-primary-500/10 dark:border-primary-500/20 backdrop-blur-md rounded-3xl p-5 shadow-inner">
                 <div className="prose prose-sm dark:prose-invert max-w-none">
                   {cleanThinking ? (
                     cleanThinking.split('\n').filter(l => l.trim()).map((line, idx) => {
@@ -253,14 +260,14 @@ function ThinkingBlock({ thinking, isStreaming, isThinkingComplete }) {
                       if (isBullet || isNumber) {
                         return (
                           <div key={idx} className="flex gap-3 mb-3 last:mb-0 group/th-item">
-                            <div className="flex-shrink-0 w-5 h-5 rounded-full bg-indigo-500/10 flex items-center justify-center mt-0.5">
+                            <div className="flex-shrink-0 w-5 h-5 rounded-full bg-primary-500/10 flex items-center justify-center mt-0.5">
                               {isNumber ? (
-                                <span className="text-[10px] font-black text-indigo-500">{line.match(/^\d+/)[0]}</span>
+                                <span className="text-[10px] font-black text-primary-500">{line.match(/^\d+/)[0]}</span>
                               ) : (
-                                <div className="w-1.5 h-1.5 rounded-full bg-indigo-500/40" />
+                                <div className="w-1.5 h-1.5 rounded-full bg-primary-500/40" />
                               )}
                             </div>
-                            <p className="text-sm leading-relaxed text-light-700 dark:text-indigo-100/70 font-medium break-words flex-1">
+                            <p className="text-sm leading-relaxed text-light-700 dark:text-primary-100/70 font-medium break-words flex-1">
                               {text}
                             </p>
                           </div>
@@ -268,16 +275,16 @@ function ThinkingBlock({ thinking, isStreaming, isThinkingComplete }) {
                       }
                       
                       return (
-                        <p key={idx} className="text-sm leading-relaxed text-light-700 dark:text-indigo-100/70 italic font-medium mb-3 last:mb-0 ml-8 opacity-80">
+                        <p key={idx} className="text-sm leading-relaxed text-light-700 dark:text-primary-100/70 italic font-medium mb-3 last:mb-0 ml-8 opacity-80">
                           {line.trim()}
                         </p>
                       );
                     })
                   ) : (
-                    <div className="flex items-center gap-3 text-indigo-500/50 italic text-sm py-2">
-                       <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-bounce" />
-                       <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-bounce [animation-delay:-0.15s]" />
-                       <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-bounce [animation-delay:-0.3s]" />
+                    <div className="flex items-center gap-3 text-primary-500/50 italic text-sm py-2">
+                       <span className="w-1.5 h-1.5 rounded-full bg-primary-500 animate-bounce" />
+                       <span className="w-1.5 h-1.5 rounded-full bg-primary-500 animate-bounce [animation-delay:-0.15s]" />
+                       <span className="w-1.5 h-1.5 rounded-full bg-primary-500 animate-bounce [animation-delay:-0.3s]" />
                        <span>Khởi tạo luồng logic...</span>
                     </div>
                   )}
@@ -285,8 +292,8 @@ function ThinkingBlock({ thinking, isStreaming, isThinkingComplete }) {
 
                 {isStreaming && !isThinkingComplete && cleanThinking && (
                   <div className="flex items-center gap-1 mt-4">
-                    <span className="w-1 h-1 rounded-full bg-indigo-500/60 animate-ping" />
-                    <span className="text-[9px] uppercase tracking-widest font-black text-indigo-500/40">Real-time Stream</span>
+                    <span className="w-1 h-1 rounded-full bg-primary-500/60 animate-ping" />
+                    <span className="text-[9px] uppercase tracking-widest font-black text-primary-500/40">Real-time Stream</span>
                   </div>
                 )}
               </div>
@@ -354,106 +361,184 @@ const TOOL_META = {
 
 const ToolStep = memo(function ToolStep({ step }) {
   const [expanded, setExpanded] = useState(false)
-  const meta = TOOL_META[step.tool] || { icon: Zap, label: step.tool, color: 'text-slate-400', bg: 'bg-light-100 dark:bg-slate-900/40 border-light-200 dark:border-slate-700/30' }
+  const meta = TOOL_META[step.tool] || { icon: Zap, label: step.tool.replace('_', ' '), color: 'text-slate-400', bg: 'bg-light-100 dark:bg-slate-900/40 border-light-200 dark:border-slate-700/30' }
   const Icon = meta.icon
 
-  return (
-    <div className={`max-w-3xl border rounded-2xl overflow-hidden shadow-sm transition-all duration-150 ${meta.bg} ${expanded ? 'bg-opacity-100 dark:bg-opacity-40' : 'bg-opacity-60 dark:bg-opacity-10'}`}>
-      <button onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-3 px-4 py-2 text-left hover:bg-white/5 transition-colors group"
-      >
-        <div className={`p-1.5 rounded-lg bg-white dark:bg-slate-950/80 ${meta.color} border border-light-200 dark:border-white/5 shadow-inner`}>
-          <Icon size={14} className="group-hover:scale-110 transition-transform" />
-        </div>
+  const hasResult = !!step.result;
+  const isError = step.result?.error || (step.result?.exit_code !== 0 && step.result?.exit_code !== undefined);
 
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className={`text-[11px] font-bold tracking-tight uppercase ${meta.color}`}>{meta.label}</span>
-            {step.result ? (
-              step.result.error
-                ? <AlertCircle size={13} className="text-red-500" />
-                : <CheckCircle2 size={13} className="text-emerald-500" />
+  return (
+    <div className={`max-w-4xl group/tool transition-all duration-300 ${expanded ? 'mb-6' : 'mb-3'}`}>
+      <div className={`relative border rounded-2xl overflow-hidden transition-all duration-300 
+        ${expanded ? 'shadow-xl shadow-primary-500/5 ring-1 ring-white/10' : 'shadow-sm hover:shadow-md'} 
+        ${meta.bg} ${expanded ? 'bg-opacity-95 dark:bg-opacity-40' : 'bg-opacity-40 dark:bg-opacity-5 hover:bg-opacity-60 dark:hover:bg-opacity-10'}`}
+      >
+        {/* Glow Effect when expanded */}
+        {expanded && <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent pointer-none" />}
+        
+        <button onClick={() => setExpanded(!expanded)}
+          className="w-full flex items-center gap-4 px-5 py-3 text-left transition-colors relative z-10"
+        >
+          {/* Status Indicator */}
+          <div className={`flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-500 shadow-inner
+            ${hasResult ? (isError ? 'bg-red-500/10 text-red-500' : 'bg-emerald-500/10 text-emerald-500') : 'bg-primary-500/10 text-primary-500 animate-pulse'}`}
+          >
+            {hasResult ? (
+              isError ? <AlertCircle size={20} /> : <CheckCircle2 size={20} className="animate-in zoom-in duration-300" />
             ) : (
-              <Loader2 size={12} className="animate-spin text-light-400 dark:text-slate-600" />
+              <Icon size={20} className="animate-pulse" />
             )}
           </div>
-          <div className="flex items-center gap-2 mt-0.5">
-            {step.args?.command && <code className="text-[10px] text-light-600 dark:text-slate-400 font-mono truncate bg-light-200 dark:bg-slate-950/40 px-1.5 py-0.5 rounded">$ {step.args.command}</code>}
-            {step.args?.path && !step.args?.command && <code className="text-[10px] text-light-600 dark:text-slate-400 font-mono truncate bg-light-200 dark:bg-slate-950/40 px-1.5 py-0.5 rounded">{step.args.path}</code>}
-            {step.args?.query && <code className="text-[10px] text-orange-600 dark:text-orange-400/80 font-mono truncate">🔍 {step.args.query}</code>}
-            {step.args?.url && !step.args?.query && <code className="text-[10px] text-teal-600 dark:text-teal-400/80 font-mono truncate">🌐 {step.args.url.replace(/^https?:\/\//, '')}</code>}
-            {step.tool === 'browser_click' && <code className="text-[10px] text-pink-600 dark:text-pink-400/80 font-mono">🖱️ Click ID: {step.args.selector}</code>}
+
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-3">
+              <span className={`text-[12px] font-black tracking-[0.1em] uppercase ${meta.color} opacity-80`}>
+                {meta.label}
+              </span>
+              <div className="h-1 w-1 rounded-full bg-slate-400/30" />
+              <span className="text-[10px] font-bold text-light-500 dark:text-slate-500 uppercase tracking-widest leading-none">
+                {hasResult ? 'Execution Complete' : 'Active Operation...'}
+              </span>
+            </div>
+            
+            <div className="flex items-center gap-3 mt-1.5 h-6">
+              {step.args?.command ? (
+                <div className="flex items-center gap-2 bg-black/20 dark:bg-slate-950/60 rounded-lg px-2.5 py-1 flex-1 max-w-md border border-white/5 group-hover/tool:border-white/10 transition-colors">
+                  <Terminal size={12} className="text-emerald-500/60" />
+                  <code className="text-[11px] text-emerald-400 font-mono truncate">$ {step.args.command}</code>
+                </div>
+              ) : step.args?.path ? (
+                <div className="flex items-center gap-2 bg-black/10 dark:bg-slate-900/40 rounded-lg px-2.5 py-1 flex-1 max-w-sm border border-white/5">
+                  <FolderOpen size={12} className="text-blue-500/60" />
+                  <code className="text-[11px] text-blue-400 font-mono truncate">{step.args.path}</code>
+                </div>
+              ) : step.args?.query ? (
+                <div className="flex items-center gap-2 text-[11px] font-bold text-orange-400 bg-orange-500/5 rounded-lg px-2.5 py-1 border border-orange-500/10">
+                  <Globe size={12} className="opacity-60" />
+                  <span className="truncate">{step.args.query}</span>
+                </div>
+              ) : (
+                <span className="text-[11px] text-light-400 dark:text-slate-600 italic">No secondary arguments</span>
+              )}
+            </div>
           </div>
-        </div>
 
-        <div className={`p-1 rounded-md text-light-400 dark:text-slate-600 group-hover:text-light-600 dark:group-hover:text-slate-400 transition-all ${expanded ? 'rotate-180' : ''}`}>
-          <ChevronDown size={14} />
-        </div>
-      </button>
+          <div className={`p-1.5 rounded-lg text-light-400 dark:text-slate-600 transition-all duration-300 ${expanded ? 'rotate-180 bg-white/5' : ''}`}>
+            <ChevronDown size={18} />
+          </div>
+        </button>
 
-      {expanded && step.result && (
-        <div className="px-4 pb-4 space-y-3 animate-slide-down border-t border-light-200 dark:border-slate-800/40 pt-3">
-          {step.result.stdout && (
-            <div className="bg-light-50 dark:bg-dark-950/90 rounded-xl p-3 border border-light-200 dark:border-slate-800/80 shadow-inner group/out relative">
-              <span className="absolute top-2 right-2 text-[9px] font-bold text-light-400 dark:text-slate-600 uppercase tracking-widest opacity-0 group-hover/out:opacity-100 transition-opacity">STDOUT</span>
-              <pre className="text-[12px] text-emerald-600 dark:text-emerald-400/90 font-mono whitespace-pre-wrap leading-relaxed break-words" style={{ overflowWrap: 'anywhere' }}>{step.result.stdout.trim()}</pre>
-            </div>
-          )}
-          {step.result.stderr && (
-            <div className="bg-red-50 dark:bg-red-950/10 rounded-xl p-3 border border-red-200 dark:border-red-900/20 relative group/err">
-              <span className="absolute top-2 right-2 text-[9px] font-bold text-red-400 dark:text-red-900/50 uppercase tracking-widest">STDERR</span>
-              <pre className="text-[12px] text-red-600 dark:text-red-400/90 font-mono whitespace-pre-wrap leading-relaxed break-words" style={{ overflowWrap: 'anywhere' }}>{step.result.stderr.trim()}</pre>
-            </div>
-          )}
-          {step.result.content && step.tool === 'read_file' && (
-            <div className="bg-light-50 dark:bg-dark-950/90 rounded-xl p-3 border border-light-200 dark:border-slate-800/80 max-h-80 overflow-y-auto">
-              <pre className="text-[12px] text-light-700 dark:text-slate-300 font-mono whitespace-pre-wrap leading-relaxed break-words" style={{ overflowWrap: 'anywhere' }}>{step.result.content}</pre>
-            </div>
-          )}
-          {step.result.items && (
-            <div className="bg-light-50 dark:bg-dark-950/90 rounded-xl p-2 border border-light-200 dark:border-slate-800/80 max-h-48 overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-x-4">
-              {step.result.items.map((item, i) => (
-                <div key={i} className="flex items-center gap-2 text-xs py-1.5 px-2 hover:bg-light-200 dark:hover:bg-white/5 rounded-lg transition-colors">
-                  {item.is_dir ? <FolderOpen size={13} className="text-yellow-600 dark:text-yellow-400/80" /> : <FileText size={13} className="text-light-500 dark:text-slate-500" />}
-                  <span className="text-light-700 dark:text-slate-300 truncate">{item.name}</span>
+        {expanded && (
+          <div className="px-5 pb-5 space-y-4 animate-in slide-in-from-top-2 fade-in duration-300 relative z-10">
+            {/* Divider */}
+            <div className="h-px w-full bg-gradient-to-r from-transparent via-light-300 dark:via-white/10 to-transparent mb-4" />
+
+            {/* Standard Outputs */}
+            {step.result?.stdout && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-[10px] font-black text-emerald-500/60 uppercase tracking-widest">Output Log</span>
+                  <div className="flex gap-1">
+                    <div className="w-2 h-2 rounded-full bg-emerald-500/20" />
+                    <div className="w-2 h-2 rounded-full bg-emerald-500/40" />
+                    <div className="w-2 h-2 rounded-full bg-emerald-500/60 animate-pulse" />
+                  </div>
                 </div>
-              ))}
-            </div>
-          )}
-          {step.result.combined_content && (
-            <div className="bg-light-50 dark:bg-dark-950/90 rounded-xl p-3 border border-light-200 dark:border-slate-800/80 max-h-60 overflow-y-auto">
-              <pre className="text-[11px] text-light-600 dark:text-slate-400 font-mono whitespace-pre-wrap leading-relaxed break-words" style={{ overflowWrap: 'anywhere' }}>{step.result.combined_content.slice(0, 3000)}{step.result.combined_content.length > 3000 ? '\n... [truncated]' : ''}</pre>
-            </div>
-          )}
-          {step.result.message && !step.result.items && !step.result.results && !step.result.combined_content && (
-            <div className="px-1 text-xs text-light-500 dark:text-slate-400 leading-relaxed italic border-l-2 border-light-300 dark:border-slate-700/50 pl-3">
-              {step.result.message}
-            </div>
-          )}
-          {/* Search results */}
-          {step.result.results && (
-            <div className="space-y-2">
-              {step.result.results.map((r, i) => (
-                <div key={i} className="bg-white dark:bg-slate-900/60 p-3 rounded-xl border border-light-200 dark:border-slate-800/60 hover:border-orange-500/30 transition-colors group/res">
-                  <a href={r.url} target="_blank" rel="noopener noreferrer"
-                    className="flex items-center gap-2 text-sm text-orange-600 dark:text-orange-300 hover:text-orange-700 dark:hover:text-orange-200 font-bold transition-colors">
-                    <Globe size={14} className="text-orange-500 dark:text-orange-400/70" />
-                    <span className="truncate">{r.title}</span>
-                    <ExternalLink size={12} className="opacity-0 group-hover/res:opacity-50" />
+                <div className="bg-slate-950/90 rounded-2xl p-4 border border-emerald-500/20 shadow-inner group/out overflow-hidden relative">
+                   <div className="absolute top-0 right-0 p-3 opacity-10 group-hover/out:opacity-20 transition-opacity">
+                      <Terminal size={40} className="text-emerald-500" />
+                   </div>
+                  <pre className="text-[12px] text-emerald-400/95 font-mono whitespace-pre-wrap leading-relaxed break-words relative z-10" style={{ overflowWrap: 'anywhere' }}>
+                    {step.result.stdout.trim()}
+                  </pre>
+                </div>
+              </div>
+            )}
+
+            {step.result?.stderr && (
+              <div className="space-y-1.5">
+                <span className="text-[10px] font-black text-red-500/60 uppercase tracking-widest px-1">Runtime Exceptions</span>
+                <div className="bg-red-950/20 rounded-2xl p-4 border border-red-500/30 relative overflow-hidden">
+                  <div className="absolute inset-0 bg-red-500/[0.02] animate-pulse" />
+                  <pre className="text-[12px] text-red-400/90 font-mono whitespace-pre-wrap leading-relaxed break-words relative z-10" style={{ overflowWrap: 'anywhere' }}>
+                    {step.result.stderr.trim()}
+                  </pre>
+                </div>
+              </div>
+            )}
+
+            {step.result?.content && (
+              <div className="space-y-1.5">
+                <span className="text-[10px] font-black text-blue-500/60 uppercase tracking-widest px-1">Buffer Content</span>
+                <div className="bg-slate-950/80 rounded-2xl p-4 border border-blue-500/20 max-h-96 overflow-y-auto custom-scrollbar shadow-inner">
+                  <pre className="text-[12px] text-blue-100/80 font-mono whitespace-pre-wrap leading-relaxed break-words" style={{ overflowWrap: 'anywhere' }}>
+                    {step.result.content}
+                  </pre>
+                </div>
+              </div>
+            )}
+
+            {/* List Results (Grid Style) */}
+            {step.result?.items && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-slate-950/40 rounded-2xl p-3 border border-white/5 max-h-60 overflow-y-auto">
+                {step.result.items.map((item, i) => (
+                  <div key={i} className="flex items-center gap-3 py-2 px-3 hover:bg-white/[0.03] rounded-xl transition-all border border-transparent hover:border-white/5 group/item">
+                    <div className={`p-1.5 rounded-lg ${item.is_dir ? 'bg-yellow-500/10 text-yellow-500' : 'bg-slate-500/10 text-slate-500'} transition-transform group-hover/item:scale-110`}>
+                      {item.is_dir ? <FolderOpen size={14} /> : <FileText size={14} />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                       <p className="text-[11px] text-slate-300 font-medium truncate">{item.name}</p>
+                       {item.size !== undefined && <p className="text-[9px] text-slate-500 font-mono uppercase">{(item.size / 1024).toFixed(1)} KB</p>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* General Results (Message/Status) */}
+            {step.result?.message && !step.result.items && !step.result.results && !step.result.content && !step.result.stdout && (
+              <div className="flex items-start gap-4 bg-white/[0.02] dark:bg-black/20 rounded-2xl p-4 border border-white/5 shadow-inner">
+                <div className="w-1.5 h-1.5 rounded-full bg-primary-500 mt-1.5 animate-pulse" />
+                <p className="text-[12px] text-light-600 dark:text-slate-400 leading-relaxed font-medium">
+                  {step.result.message}
+                </p>
+              </div>
+            )}
+
+            {/* Search results (Premium Cards) */}
+            {step.result?.results && (
+              <div className="grid grid-cols-1 gap-3">
+                {step.result.results.map((r, i) => (
+                  <a key={i} href={r.url} target="_blank" rel="noopener noreferrer"
+                    className="group/res block bg-white/20 dark:bg-slate-900/60 p-4 rounded-2xl border border-white/5 hover:border-primary-500/40 hover:shadow-lg hover:shadow-primary-500/5 transition-all relative overflow-hidden"
+                  >
+                    <div className="absolute top-0 right-0 p-4 opacity-5 group-hover/res:opacity-10 transition-opacity">
+                       <Globe size={40} className="text-primary-500" />
+                    </div>
+                    <div className="flex items-center gap-2 mb-2">
+                       <Globe size={14} className="text-primary-500" />
+                       <span className="text-[11px] text-primary-500/80 font-black uppercase tracking-widest">{new URL(r.url).hostname}</span>
+                    </div>
+                    <h4 className="text-sm text-light-900 dark:text-white font-bold mb-2 group-hover/res:text-primary-400 transition-colors line-clamp-1">{r.title}</h4>
+                    <p className="text-xs text-light-600 dark:text-slate-400 leading-relaxed line-clamp-2 opacity-80">{r.snippet}</p>
+                    <div className="flex items-center gap-1 mt-3 text-[10px] font-bold text-primary-500 opacity-0 group-hover/res:opacity-100 transition-all translate-y-2 group-hover/res:translate-y-0 text-right justify-end">
+                       READ FULL <ExternalLink size={10} />
+                    </div>
                   </a>
-                  <p className="text-xs text-light-600 dark:text-slate-400 mt-1.5 leading-relaxed">{r.snippet}</p>
-                </div>
-              ))}
-            </div>
-          )}
-          {step.result.error && (
-            <div className="flex items-center gap-2 text-xs text-red-400 bg-red-950/20 p-3 rounded-xl border border-red-900/30">
-              <AlertCircle size={14} />
-              <span>{step.result.error}</span>
-            </div>
-          )}
-        </div>
-      )}
+                ))}
+              </div>
+            )}
+
+            {/* Error fallback */}
+            {step.result?.error && !step.result?.stderr && (
+              <div className="flex items-center gap-3 bg-red-500/10 p-4 rounded-2xl border border-red-500/20 text-red-400 shadow-inner">
+                <AlertCircle size={18} className="flex-shrink-0" />
+                <span className="text-xs font-bold leading-relaxed">{step.result.error}</span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   )
 })
@@ -642,9 +727,9 @@ const SessionItem = memo(function SessionItem({ session, active, onSelect, onDel
   return (
     <div onClick={() => !isEditing && onSelect(session.id)}
       className={`group flex items-center gap-2 px-3 py-2.5 rounded-xl cursor-pointer transition-all duration-200 
-        ${active ? 'bg-indigo-600/10 dark:bg-indigo-600/15 border border-indigo-500/20' : 'hover:bg-light-200 dark:hover:bg-slate-800/50'}`}
+        ${active ? 'bg-primary-600/10 dark:bg-primary-600/15 border border-primary-500/20' : 'hover:bg-light-200 dark:hover:bg-slate-800/50'}`}
     >
-      <Zap size={14} className={`flex-shrink-0 ${active ? 'text-indigo-600 dark:text-indigo-400' : 'text-light-400 dark:text-slate-500'}`} />
+      <Zap size={14} className={`flex-shrink-0 ${active ? 'text-primary-600 dark:text-primary-400' : 'text-light-400 dark:text-slate-500'}`} />
       <div className="flex-1 min-w-0" onDoubleClick={() => setIsEditing(true)}>
         {isEditing ? (
           <input
@@ -656,7 +741,7 @@ const SessionItem = memo(function SessionItem({ session, active, onSelect, onDel
             onKeyDown={e => e.key === 'Enter' && handleFinish()}
           />
         ) : (
-          <span className={`block text-xs truncate ${active ? 'text-indigo-700 dark:text-white font-medium' : 'text-light-600 dark:text-slate-400'}`}>
+          <span className={`block text-xs truncate ${active ? 'text-primary-700 dark:text-white font-medium' : 'text-light-600 dark:text-slate-400'}`}>
             {session.title?.replace('🤖 ', '').replace(/<\/?(?:think|thought)>/gi, '') || 'New Task'}
           </span>
         )}
@@ -779,6 +864,7 @@ export default function Chat() {
   // Handle daemon events — update agentEvents in real-time
   useEffect(() => {
     daemon.onEvent((event) => {
+      // ── Legacy wrapper format (task_log) ───────────────────────────
       if (event.type === 'task_log') {
         if (event.session_id !== activeSessionRef.current) return
         const log = event.log
@@ -793,6 +879,52 @@ export default function Chat() {
           fetchMessages(activeSessionRef.current)
         }
         return
+      }
+
+      // ── Raw daemon events (broadcast directly from AgentDaemon) ────
+      // Filter by session_id:
+      //   - If the event has a session_id, only process it for the matching session
+      //   - If the event has no session_id (null), only process it when currentSession is also null
+      const evSessionId = event.session_id ?? null
+      const currentSession = activeSessionRef.current
+      if (evSessionId !== null && evSessionId !== currentSession) return
+      if (evSessionId === null && currentSession !== null) return
+
+      switch (event.type) {
+        case 'session':
+          // New session created — update active session
+          if (!currentSession && event.session_id) {
+            setActiveSession(event.session_id)
+            activeSessionRef.current = event.session_id
+            api.get('/ai/sessions').then(r => setSessions(r.data)).catch(() => {})
+          }
+          return
+
+        case 'done':
+          setStreaming(false)
+          return
+
+        case 'daemon_status':
+        case 'heartbeat':
+        case 'ack':
+        case 'user_inject':
+          // UI-level events, not agent content
+          return
+
+        case 'tool_call':
+        case 'tool_result':
+        case 'tool_result_screenshot':
+        case 'screenshot':
+        case 'text':
+        case 'thinking':
+        case 'thinking_token':
+        case 'error':
+          // Route raw agent content events into the last agent message
+          setAgentEvents(prev => mergeEvent(prev, event))
+          return
+
+        default:
+          return
       }
     })
   }, [daemon])
@@ -910,6 +1042,9 @@ export default function Chat() {
       // If this was a new session, pick up the ID from backend and refresh list
       if (!activeSession && res.data.session_id) {
         const newId = res.data.session_id
+        // Update ref IMMEDIATELY so daemon events for this session aren't filtered out
+        // before React re-render propagates the new state value
+        activeSessionRef.current = newId
         setActiveSession(newId)
         api.get('/ai/sessions').then(r => setSessions(r.data)).catch(() => { })
       }
@@ -1250,7 +1385,7 @@ export default function Chat() {
                   <div className="flex items-center gap-2">
                     <button onClick={handleCreateTask} disabled={!input.trim()}
                       title="Chạy ngầm (Background Task)"
-                      className="flex-shrink-0 w-10 h-10 md:w-12 md:h-12 rounded-[20px] md:rounded-[22px] bg-indigo-50 dark:bg-indigo-500/10 text-indigo-500 hover:bg-indigo-500 hover:text-white flex items-center justify-center transition-all disabled:opacity-30 disabled:grayscale active:scale-90">
+                      className="flex-shrink-0 w-10 h-10 md:w-12 md:h-12 rounded-[20px] md:rounded-[22px] bg-primary-50 dark:bg-primary-500/10 text-primary-500 hover:bg-primary-500 hover:text-white flex items-center justify-center transition-all disabled:opacity-30 disabled:grayscale active:scale-90">
                       <Zap size={22} className={input.trim() ? "animate-in zoom-in-50 duration-150" : ""} />
                     </button>
                     <button onClick={handleSend} disabled={!input.trim()}

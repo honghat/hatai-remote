@@ -163,11 +163,11 @@
 }
 
 .chat-markdown-content th {
-  @apply px-5 py-3 text-left font-bold uppercase text-[0.7rem] tracking-widest text-indigo-600 dark:text-indigo-400;
+  @apply px-5 py-3 text-left font-bold uppercase text-[0.7rem] tracking-widest text-primary-600 dark:text-primary-400;
 }
 
 .chat-markdown-content tbody tr {
-  @apply border-b border-light-200 dark:border-white/5 last:border-0 hover:bg-indigo-50/30 dark:hover:bg-indigo-500/5 transition-colors;
+  @apply border-b border-light-200 dark:border-white/5 last:border-0 hover:bg-primary-50/30 dark:hover:bg-primary-500/5 transition-colors;
 }
 
 .chat-markdown-content td {
@@ -179,7 +179,7 @@
 }
 
 .chat-markdown-content strong {
-  @apply text-indigo-600 dark:text-indigo-400 font-bold;
+  @apply text-primary-600 dark:text-primary-400 font-bold;
 }
 
 /* Custom Animations */

@@ -85,6 +85,8 @@ export default function Project() {
   const [mentionQuery, setMentionQuery] = useState('')
   const chatInputRef = useRef(null)
   const chatScrollRef = useRef(null)
+  const socketRef = useRef(null)
+  const [daemonState, setDaemonState] = useState('idle')
 
   const availableModels = [
     { id: 'openai', name: 'OpenAI Server', icon: Server, desc: 'Generic API' },
@@ -110,11 +112,155 @@ export default function Project() {
     fetchFiles()
     fetchSessions()
     fetchGitStatus()
+    
+    // ── WebSocket Integration ───────────────────────────────────────────
+    const connectAgentWS = () => {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+        const hostname = window.location.hostname
+        const token = localStorage.getItem('hatai_token')
+        const wsUrl = `${protocol}//${hostname}:8000/agent/daemon/ws?token=${token}`
+        
+        console.log(`🔌 Connecting to Agent Daemon WS at ${wsUrl}...`)
+        const ws = new WebSocket(wsUrl)
+        socketRef.current = ws
+
+        ws.onopen = () => {
+            console.log("✅ Agent Daemon Connected")
+        }
+
+        ws.onmessage = (event) => {
+            const rawData = JSON.parse(event.data)
+            
+            // 1. Handle Global Status
+            if (rawData.type === 'daemon_status' || rawData.type === 'heartbeat') {
+                setDaemonState(rawData.state)
+                
+                // Check if our active session is running in the background
+                const isActiveRunning = (rawData.active_sessions || []).includes(Number(activeSessionId))
+                if (isActiveRunning || (rawData.state === 'running' && rawData.session_id == activeSessionId)) {
+                    setAgentStatus(rawData.message || '⚙️ Agent is working in background...')
+                    setIsChatStreaming(true)
+                } else if (rawData.state === 'idle' || rawData.state === 'done') {
+                    if (rawData.session_id == activeSessionId || !rawData.session_id) {
+                        setAgentStatus(null)
+                        setIsChatStreaming(false)
+                    }
+                }
+                return
+            }
+
+            // 2. Unpack task_log if present
+            const isTaskLog = rawData.type === 'task_log'
+            const data = isTaskLog ? { ...rawData.log, session_id: rawData.session_id } : rawData
+
+            // 3. Handle Session-Specific Events
+            if (data.session_id && data.session_id == activeSessionId) {
+                setChatMessages(prev => {
+                    const next = [...prev]
+                    const lastIdx = next.length - 1
+                    let lastMsg = lastIdx >= 0 ? { ...next[lastIdx] } : null
+                    
+                    // If last message is not from assistant, create one
+                    if (!lastMsg || lastMsg.role !== 'assistant') {
+                        lastMsg = { role: 'assistant', content: '', thoughts: '', tool_calls: [], screenshots: [], processedIndices: new Set() }
+                        next.push(lastMsg)
+                    } else {
+                        lastMsg = { ...lastMsg } // Clone for immutability
+                        lastMsg.tool_calls = [...(lastMsg.tool_calls || [])]
+                        lastMsg.screenshots = [...(lastMsg.screenshots || [])]
+                        lastMsg.processedIndices = lastMsg.processedIndices || new Set()
+                        next[next.length - 1] = lastMsg
+                    }
+
+                    // Deduplicate via Task Log Index if available
+                    if (isTaskLog && data.index !== undefined) {
+                        if (lastMsg.processedIndices.has(data.index)) return prev
+                        lastMsg.processedIndices.add(data.index)
+                    }
+
+                    if (data.type === 'thinking_token' || data.type === 'thinking') {
+                        const newThought = data.content || ''
+                        if (newThought && !lastMsg.thoughts.endsWith(newThought)) {
+                            lastMsg.thoughts = (lastMsg.thoughts || '') + newThought
+                        }
+                    } else if (data.type === 'text') {
+                        const newContent = data.content || ''
+                        if (newContent) {
+                            // Smarter deduplication: don't append if the last few chars match exactly
+                            const current = lastMsg.content || ''
+                            if (!current.endsWith(newContent)) {
+                                lastMsg.content = current + newContent
+                            }
+                        }
+                        
+                        // Live stream to editor
+                        if (activeTab && lastMsg.content.includes('```')) {
+                           const codeLines = lastMsg.content.split('\n')
+                           const blockStart = codeLines.lastIndexOf(codeLines.find(l => l.startsWith('```')))
+                           if (blockStart !== -1) {
+                               const currentBlock = codeLines.slice(blockStart + 1).join('\n')
+                               if (!currentBlock.includes('```')) {
+                                   setProposingContents(draft => ({ ...draft, [activeTab]: currentBlock }))
+                               }
+                           }
+                        }
+                    } else if (data.type === 'tool_call') {
+                        // Avoid duplicate tool calls (common in task log loops)
+                        const isDup = lastMsg.tool_calls.some(tc => tc.tool === data.tool && JSON.stringify(tc.args) === JSON.stringify(data.args) && !tc.result)
+                        if (!isDup) {
+                            lastMsg.tool_calls.push({ tool: data.tool, args: data.args, result: null })
+                        }
+                        setAgentStatus(`⚙️ Đang chạy: ${data.tool}...`)
+                    } else if (data.type === 'tool_result') {
+                        const tcIdx = [...lastMsg.tool_calls].reverse().findIndex(t => t.tool.includes(data.tool) && !t.result)
+                        if (tcIdx !== -1) {
+                            const actualIdx = lastMsg.tool_calls.length - 1 - tcIdx
+                            lastMsg.tool_calls[actualIdx] = { ...lastMsg.tool_calls[actualIdx], result: data.result }
+                        }
+                        setAgentStatus(`✅ Hoàn thiện: ${data.tool}`)
+                    } else if (data.type === 'screenshot' || data.type === 'tool_result_screenshot') {
+                        const url = data.url || data.content || (data.base64 ? `data:image/png;base64,${data.base64}` : null)
+                        if (url && !lastMsg.screenshots.includes(url)) lastMsg.screenshots.push(url)
+                    } else if (data.type === 'done' || data.type === 'task_result') {
+                        setAgentStatus(null)
+                        setIsChatStreaming(false)
+                        if (data.result && data.result.length > lastMsg.content.length) {
+                             lastMsg.content = data.result
+                        }
+                    } else if (data.type === 'error') {
+                        if (!lastMsg.content.includes(data.content)) {
+                            lastMsg.content += `\n\n❌ **Error**: ${data.content}`
+                        }
+                        setAgentStatus(null)
+                        setIsChatStreaming(false)
+                    }
+
+                    return next
+                })
+            }
+        }
+
+        ws.onclose = () => {
+            console.log("🔌 Agent Daemon Disconnected. Reconnecting...")
+            setTimeout(connectAgentWS, 3000)
+        }
+        
+        ws.onerror = (err) => {
+            console.error("❌ WS Error", err)
+            ws.close()
+        }
+    }
+
+    connectAgentWS()
+
     const timer = setInterval(() => { 
         fetchLogs()
-        fetchGitStatus() // Auto-poll git status for "Always Connected" state
+        fetchGitStatus()
     }, 10000)
-    return () => clearInterval(timer)
+    return () => {
+        clearInterval(timer)
+        if (socketRef.current) socketRef.current.close()
+    }
   }, [])
 
   const fetchFiles = async () => {
@@ -341,125 +487,44 @@ export default function Project() {
 
   const [agentStatus, setAgentStatus] = useState(null)
 
-  const handleSendChat = async () => {
+  async function handleSendChat() {
     if (!chatInput.trim() || isChatStreaming) return
     const userMsg = chatInput.trim()
-    setChatInput('')
-    setAttachments([]) // Clear current staging
-    setChatMessages(prev => [...prev, { role: 'user', content: userMsg, attachments: [...attachments] }])
     
-    // PREPEND active file context
+    // Create local UI message immediately
+    const userDisplayMsg = { role: 'user', content: userMsg, attachments: [...attachments] }
+    setChatMessages(prev => [...prev, userDisplayMsg])
+    
+    setChatInput('')
+    setAttachments([]) 
+    
     const contextPrefix = activeTab && editingContents[activeTab] ? `[ACTIVE_FILE: ${activeTab}]\n` : ''
     const fullMsg = contextPrefix + userMsg
 
     setIsChatStreaming(true)
-    setAgentStatus('🚀 Khởi tạo Agent...')
+    setAgentStatus('🚀 Đang khởi tạo Task chạy ngầm...')
     
     try {
-        const response = await fetch('/api/agent/run', {
-            method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json', 
-                'Authorization': `Bearer ${localStorage.getItem('hatai_token')}` 
-            },
-            body: JSON.stringify({ 
-                message: fullMsg, 
-                session_id: activeSessionId,
-                attachments: attachments
-            })
+        // Submit as a formal Background Task
+        const resp = await api.post('/tasks', {
+            prompt: fullMsg,
+            session_id: activeSessionId,
+            attachments: attachments,
+            max_tokens: 8192,
+            temperature: 0.5
         })
         
-        if (!response.ok) throw new Error('Agent failed to start')
-
-        const reader = response.body.getReader()
-        const decoder = new TextDecoder()
-        
-        let assistantMsg = { 
-            role: 'assistant', 
-            content: '', 
-            thoughts: '', 
-            tool_calls: [], 
-            screenshots: [] 
+        const taskId = resp.data.id
+        if (!activeSessionId && resp.data.session_id) {
+            setActiveSessionId(resp.data.session_id)
+            localStorage.setItem('hatai_session_id', resp.data.session_id)
         }
         
-        setChatMessages(prev => [...prev, assistantMsg])
-        
-        let lastUpdateTime = Date.now()
-        let currentToolCall = null
-
-        while (true) {
-            const { done, value } = await reader.read()
-            if (done) break
-            const chunk = decoder.decode(value)
-            const lines = chunk.split('\n')
-            
-            for (const line of lines) {
-                if (!line.startsWith('data: ')) continue
-                
-                try {
-                    const data = JSON.parse(line.substring(6))
-                    
-                    if (data.type === 'session') {
-                        if (!activeSessionId) {
-                            setActiveSessionId(data.session_id)
-                            localStorage.setItem('hatai_session_id', data.session_id)
-                        }
-                    } else if (data.type === 'thinking_token') {
-                        assistantMsg.thoughts += data.content
-                    } else if (data.type === 'tool_call') {
-                        currentToolCall = { tool: data.tool, args: data.args, result: null }
-                        assistantMsg.tool_calls.push(currentToolCall)
-                        setAgentStatus(`⚙️ Đang chạy: ${data.tool}...`)
-                    } else if (data.type === 'tool_result') {
-                        if (currentToolCall) {
-                            currentToolCall.result = data.result
-                            setAgentStatus(`✅ Hoàn thành: ${data.tool}`)
-                        }
-                    } else if (data.type === 'screenshot') {
-                        assistantMsg.screenshots.push(data.url)
-                    } else if (data.type === 'text') {
-                        const token = data.content
-                        assistantMsg.content += token
-                        
-                        // MAGIC EDIT: Live stream to editor
-                        if (activeTab && assistantMsg.content.includes('```')) {
-                           const codeLines = assistantMsg.content.split('\n')
-                           const blockStart = codeLines.lastIndexOf(codeLines.find(l => l.startsWith('```')))
-                           if (blockStart !== -1) {
-                               const currentBlock = codeLines.slice(blockStart + 1).join('\n')
-                               if (!currentBlock.includes('```')) {
-                                   setProposingContents(prev => ({ ...prev, [activeTab]: currentBlock }))
-                               }
-                           }
-                        }
-                    } else if (data.type === 'done') {
-                        setAgentStatus(null)
-                    }
-
-                    const now = Date.now()
-                    if (now - lastUpdateTime > 30) {
-                        setChatMessages(prev => {
-                            const next = [...prev]
-                            next[next.length - 1] = { ...assistantMsg }
-                            return next
-                        })
-                        lastUpdateTime = now
-                    }
-                } catch (e) {}
-            }
-        }
-        
-        // Final UI sync
-        setChatMessages(prev => {
-            const next = [...prev]
-            next[next.length - 1] = { ...assistantMsg }
-            return next
-        })
+        setAgentStatus(`📦 Task #${taskId} đã tạo. Đang thực thi...`)
     } catch (err) {
-        setChatMessages(prev => [...prev, { role: 'assistant', content: `❌ Lỗi: ${err.message}` }])
-    } finally { 
+        setAgentStatus(`❌ Lỗi: ${err.response?.data?.detail || err.message}`)
         setIsChatStreaming(false)
-        setAgentStatus(null)
+        setChatMessages(prev => [...prev, { role: 'assistant', content: `❌ Không thể tạo task chạy ngầm: ${err.message}` }])
     }
   }
 
@@ -859,130 +924,173 @@ export default function Project() {
         </div>
 
         {/* Chat Sidebar */}
-        <div className={`w-[450px] border-l flex flex-col relative transition-all duration-300 ${showChat ? 'translate-x-0' : 'translate-x-full fixed right-[-450px]'} ${isDark ? 'bg-[#0a0a0c] border-white/5 shadow-2xl shadow-black/80' : 'bg-[#f5f2eb] border-black/[0.05]'}`}>
+        <div className={`w-[550px] border-l flex flex-col relative transition-all duration-300 ${showChat ? 'translate-x-0' : 'translate-x-full fixed right-[-550px]'} ${isDark ? 'bg-[#0a0a0c] border-white/5 shadow-2xl shadow-black/80' : 'bg-[#f5f2eb] border-black/[0.05]'}`}>
             {!showChat && <button onClick={() => setShowChat(true)} className={`absolute left-[-40px] top-1/2 -translate-y-1/2 w-10 h-20 border rounded-l-2xl flex items-center justify-center shadow-2xl hover:scale-105 transition-all ${isDark ? 'bg-[#111114] border-white/10 text-primary-400' : 'bg-[#f5f2eb] border-black/5'}`}><Sparkles size={24} /></button>}
             <div className={`p-8 flex items-center justify-between`}>
                 <div className="flex items-center gap-4"><div className="w-10 h-10 bg-primary-600 rounded-2xl flex items-center justify-center text-white shadow-2xl shadow-primary-600/30"><Zap size={20} /></div><h2 className="text-[14px] font-black uppercase tracking-[0.4em]">HatAI Code</h2></div>
                 <button onClick={() => setShowChat(false)} className={`p-2 rounded-xl transition-all ${isDark ? 'hover:bg-white/5 text-slate-500 hover:text-white' : 'hover:bg-black/5 text-slate-300 hover:text-black'}`}><X size={18} /></button>
             </div>
-            <div className="flex-1 overflow-auto px-8 py-4 space-y-12 custom-scrollbar">
-                {chatMessages.map((msg, i) => (
-                    <div key={i} className={`flex flex-col gap-6 w-full animate-slide-up mb-8 last:mb-12 ${msg.role === 'user' ? 'items-end' : 'items-start'}`} style={{ animationDelay: `${i * 100}ms` }}>
+            <div className="flex-1 overflow-y-auto px-8 py-6 space-y-10 custom-scrollbar scroll-smooth" ref={chatScrollRef}>
+                {chatMessages.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center text-center py-20 animate-fade-in">
+                        <div className="relative group">
+                            <Bot size={80} className="mb-8 text-primary-500 opacity-20 group-hover:opacity-40 transition-opacity" />
+                            <div className="absolute inset-0 bg-primary-500/20 blur-[60px] rounded-full animate-pulse opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </div>
+                        <h3 className="text-xl font-black uppercase tracking-[0.4em] mb-4 opacity-60">HatAI Code Agent</h3>
+                        <p className="text-[12px] opacity-40 max-w-[280px] leading-relaxed font-bold mb-12">Chuyên gia lập trình tự động với quyền truy cập hệ thống toàn diện.</p>
                         
-                        {/* Role Header */}
-                        <div className="flex items-center gap-3 px-1">
+                        <div className="grid grid-cols-1 gap-3 w-full max-w-[320px]">
+                            {[
+                                { t: '🚀 Review dự án hiện tại', p: 'Review toàn bộ codebase và tìm lỗi tiềm ẩn' },
+                                { t: '📝 Tạo README chuyên nghiệp', p: 'Viết tài liệu hướng dẫn đầy đủ cho repository này' },
+                                { t: '🛠️ Fix lỗi UI / UX', p: 'Tìm và sửa các lỗi giao diện trong frontend' },
+                                { t: '📦 Push toàn bộ lên GitHub', p: 'Commit và đẩy mã nguồn lên cloud' }
+                            ].map(item => (
+                                <button key={item.t} onClick={() => setChatInput(item.t)} className={`group relative p-5 text-left rounded-3xl border transition-all duration-300 ${isDark ? 'bg-white/[0.02] border-white/5 hover:border-primary-500/40 hover:bg-primary-500/[0.05]' : 'bg-white border-black/[0.03] hover:border-primary-500/40 hover:shadow-xl'}`}>
+                                    <div className="text-[12px] font-black uppercase tracking-widest mb-1 group-hover:text-primary-500 transition-colors">{item.t}</div>
+                                    <div className="text-[10px] opacity-40 font-medium leading-relaxed">{item.p}</div>
+                                    <ArrowRight size={14} className="absolute right-5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 group-hover:translate-x-1 transition-all text-primary-500" />
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                ) : (
+                    chatMessages.map((msg, i) => (
+                        <div key={i} className={`flex flex-col gap-6 w-full animate-slide-up mb-8 last:mb-2 ${msg.role === 'user' ? 'items-end' : 'items-start'}`} style={{ animationDelay: `${i * 100}ms` }}>
+                            
+                            {/* Role Header */}
+                            <div className="flex items-center gap-3 px-1">
+                                {msg.role === 'user' ? (
+                                    <>
+                                        <span className="text-[9px] font-black uppercase tracking-[0.3em] opacity-40 text-slate-500">Command Node</span>
+                                        <div className="w-6 h-[1px] bg-slate-500/20" />
+                                    </>
+                                ) : (
+                                    <>
+                                        <div className={`w-1.5 h-1.5 rounded-full ring-4 ${isChatStreaming && (i === chatMessages.length - 1) ? 'bg-amber-500 animate-pulse ring-amber-500/20' : 'bg-amber-600 ring-amber-600/10'}`} />
+                                        <span className="text-[9px] font-black uppercase tracking-[0.3em] text-amber-600">Core Engine</span>
+                                    </>
+                                )}
+                            </div>
+
                             {msg.role === 'user' ? (
-                                <>
-                                    <span className="text-[9px] font-black uppercase tracking-[0.3em] opacity-40">Command Node</span>
-                                    <div className="w-6 h-[1px] bg-primary-500/30" />
-                                </>
+                                <div className="flex flex-col items-end gap-3 max-w-[90%]">
+                                    {msg.attachments && msg.attachments.length > 0 && (
+                                        <div className="flex flex-wrap gap-2 justify-end mb-2">
+                                            {msg.attachments.map((file, idx) => (
+                                                <div key={idx} className={`relative group w-16 h-16 rounded-xl overflow-hidden border ${isDark ? 'border-white/10' : 'border-black/10'}`}>
+                                                    {file.type?.startsWith('image') ? <img src={file.url} className="w-full h-full object-cover" /> : <div className="flex flex-col items-center justify-center h-full gap-1 opacity-40"><FileCode size={16}/><span className="text-[7px] uppercase font-black">File</span></div>}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                    <div className={`px-6 py-4 text-[14px] leading-relaxed font-bold border transition-all ${isDark ? 'bg-[#121217] border-white/5 text-slate-100 rounded-[28px] rounded-tr-none shadow-2xl shadow-black/40' : 'bg-white border-black/[0.03] text-slate-800 rounded-[28px] rounded-tr-none shadow-xl shadow-black/5'}`}>
+                                        {msg.content}
+                                    </div>
+                                </div>
                             ) : (
-                                <>
-                                    <div className="w-1.5 h-1.5 rounded-full bg-primary-600 animate-pulse ring-4 ring-primary-600/20" />
-                                    <span className="text-[9px] font-black uppercase tracking-[0.3em] text-primary-600">Core Engine</span>
-                                </>
+                                <div className="flex flex-col gap-6 w-full max-w-full pl-2">
+                                    {msg.thoughts && (
+                                        <div className={`relative p-5 rounded-3xl border transition-all duration-700 group/logic overflow-hidden ${isDark ? 'bg-amber-500/[0.02] border-amber-500/10 hover:border-amber-500/30' : 'bg-amber-50/20 border-amber-100/50 hover:border-amber-200 shadow-sm shadow-amber-900/5'}`}>
+                                            <div className="flex items-center gap-4 mb-4">
+                                                <div className="flex items-center gap-3 text-[9px] font-black uppercase tracking-[0.2em] text-amber-500/60">
+                                                    <div className="w-2 h-2 rounded-full bg-amber-600/40 animate-ping" />
+                                                    Logic Stream
+                                                </div>
+                                                <div className="flex-1 h-[1px] bg-amber-500/10" />
+                                                <div className="text-[8px] font-mono opacity-20 group-hover/logic:opacity-60 transition-opacity uppercase tracking-widest leading-none">Thinking...</div>
+                                            </div>
+                                            <div className={`text-[12px] leading-relaxed font-medium italic font-mono space-y-2 transition-colors max-h-[160px] overflow-y-auto custom-scrollbar pr-2 ${isDark ? 'text-slate-400 group-hover/logic:text-slate-300' : 'text-slate-500 group-hover/logic:text-slate-800'}`}>
+                                                <ReactMarkdown className="prose-slate prose-invert opacity-80">{msg.thoughts}</ReactMarkdown>
+                                            </div>
+                                            <div className={`absolute -inset-[1px] rounded-3xl bg-gradient-to-br transition-opacity duration-700 pointer-events-none opacity-0 group-hover/logic:opacity-100 ${isDark ? 'from-amber-500/5 via-transparent to-transparent' : 'from-amber-500/5 via-transparent to-transparent'}`} />
+                                            {/* Gradient fade to indicate overflow */}
+                                            <div className={`absolute bottom-0 left-0 right-0 h-8 pointer-events-none bg-gradient-to-t ${isDark ? 'from-slate-900/20 to-transparent' : 'from-white/20 to-transparent'}`} />
+                                        </div>
+                                    )}
+
+                                    {msg.tool_calls && msg.tool_calls.map((tc, j) => (
+                                        <div key={j} className={`w-full max-w-[95%] p-5 rounded-3xl border transition-all duration-500 ${isDark ? 'bg-slate-900/40 border-white/5 hover:border-primary-500/20 shadow-inner' : 'bg-slate-50/50 border-black/5 hover:border-primary-200 shadow-sm'}`}>
+                                            <div className="flex items-center justify-between mb-4">
+                                                <div className="flex items-center gap-4">
+                                                    <div className={`w-10 h-10 rounded-2xl flex items-center justify-center transition-colors shadow-lg ${tc.result ? (isDark ? 'bg-green-500/20 text-green-500 border border-green-500/20' : 'bg-green-50 text-green-600 border border-green-200') : (isDark ? 'bg-primary-500/20 text-primary-500 border border-primary-500/20' : 'bg-primary-50 text-primary-600 border border-primary-100')}`}>
+                                                        {tc.result ? <Plus size={18} className="rotate-45" /> : <Cpu size={18} className="animate-spin-slow" />}
+                                                    </div>
+                                                    <div>
+                                                        <p className={`text-[11px] font-black uppercase tracking-[0.2em] ${tc.result ? 'text-green-500' : 'text-primary-500'}`}>{tc.tool}</p>
+                                                        <div className="flex items-center gap-2 mt-0.5">
+                                                            <div className={`w-1.5 h-1.5 rounded-full ${tc.result ? 'bg-green-500' : 'bg-primary-500 animate-pulse'}`} />
+                                                            <p className="text-[10px] opacity-40 font-mono tracking-tighter uppercase">{tc.result ? 'Protocol Executed' : 'Processing Request...'}</p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                {!tc.result && <div className="flex gap-1.5 px-3 py-1 bg-primary-500/10 rounded-full"><div className="w-1 h-1 bg-primary-500 rounded-full animate-bounce [animation-duration:0.8s]" /><div className="w-1 h-1 bg-primary-500 rounded-full animate-bounce [animation-duration:0.8s] [animation-delay:0.2s]" /><div className="w-1 h-1 bg-primary-500 rounded-full animate-bounce [animation-duration:0.8s] [animation-delay:0.4s]" /></div>}
+                                            </div>
+                                            {tc.args && (
+                                                <div className={`p-4 rounded-2xl font-mono text-[11px] overflow-x-auto whitespace-pre custom-scrollbar-h ${isDark ? 'bg-black/60 text-slate-400 border border-white/5' : 'bg-white border border-black/[0.03] shadow-inner text-slate-500'}`}>
+                                                    <span className="opacity-30 mr-2">$ {tc.tool}_params </span>
+                                                    {JSON.stringify(tc.args, null, 2)}
+                                                </div>
+                                            )}
+                                            {tc.result && tc.result.error && (
+                                                <div className="mt-3 p-4 rounded-2xl bg-red-500/5 border border-red-500/10 text-red-500 text-[11px] font-bold flex items-center gap-3 shadow-lg shadow-red-900/10">
+                                                    <X size={14} className="shrink-0" />
+                                                    <span>EXECUTION_FAILURE: {tc.result.error}</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+
+                                    {msg.screenshots && msg.screenshots.length > 0 && (
+                                        <div className="flex flex-wrap gap-5 py-2">
+                                            {msg.screenshots.map((s, j) => (
+                                                <div key={j} className="group relative overflow-hidden rounded-3xl border border-white/5 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.8)] transition-all duration-500 hover:scale-[1.02] hover:rotate-1">
+                                                    <img src={s} alt="Workspace Result" className="max-w-[440px] h-auto object-contain cursor-zoom-in brightness-90 group-hover:brightness-110 transition-all" />
+                                                    <div className="absolute top-6 left-6 px-4 py-2 bg-black/60 backdrop-blur-xl rounded-2xl text-[10px] text-white flex items-center gap-3 font-black uppercase tracking-[0.2em] border border-white/10 group-hover:border-primary-500/50 shadow-2xl transition-all">
+                                                        <Monitor size={14} className="text-primary-500 animate-pulse" /> Live Workspace Result
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    {msg.content && (
+                                        <div className={`prose prose-sm max-w-none prose-p:leading-relaxed prose-p:text-[15px] prose-p:mb-4 last:prose-p:mb-0 prose-strong:text-amber-500 prose-headings:font-black prose-headings:uppercase prose-headings:tracking-[0.2em] prose-headings:text-primary-500/80 transition-colors ${isDark ? 'prose-invert text-slate-300' : 'text-slate-700 font-medium'}`}>
+                                            <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
+                                                code({node, inline, className, children, ...props}) {
+                                                    const match = /language-(\w+)/.exec(className || '')
+                                                    return !inline && match ? (
+                                                        <div className="relative group/code mt-8 mb-8 rounded-[30px] overflow-hidden border border-white/5 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.5)]">
+                                                            <div className="absolute top-0 right-0 px-5 py-2 bg-white/5 backdrop-blur-3xl text-[10px] font-black uppercase tracking-[0.3em] opacity-40 z-10 border-b border-l border-white/5 transition-opacity group-hover/code:opacity-100">{match[1]}</div>
+                                                            <SyntaxHighlighter style={isDark ? vscDarkPlus : oneLight} language={match[1]} PreTag="div" className="!m-0 !p-8 !text-[14px] !bg-transparent custom-scrollbar" {...props}>
+                                                                {String(children).replace(/\n$/, '')}
+                                                            </SyntaxHighlighter>
+                                                        </div>
+                                                    ) : (
+                                                        <code className={`px-2 py-0.5 rounded-lg font-black transition-colors ${isDark ? 'bg-white/5 text-primary-400 group-hover/code:text-primary-300' : 'bg-black/5 text-primary-600'}`} {...props}>{children}</code>
+                                                    )
+                                                }
+                                            }}>{msg.content.replace(/<(think|thought)>[\s\S]*?<\/\1>/gi, '').trim()}</ReactMarkdown>
+                                        </div>
+                                    )}
+                                </div>
                             )}
                         </div>
-
-                        {msg.role === 'user' ? (
-                            <div className="flex flex-col items-end gap-3 max-w-[90%]">
-                                {msg.attachments && msg.attachments.length > 0 && (
-                                    <div className="flex flex-wrap gap-2 justify-end mb-2">
-                                        {msg.attachments.map((file, idx) => (
-                                            <div key={idx} className={`relative group w-16 h-16 rounded-xl overflow-hidden border ${isDark ? 'border-white/10' : 'border-black/10'}`}>
-                                                {file.type?.startsWith('image') ? <img src={file.url} className="w-full h-full object-cover" /> : <div className="flex flex-col items-center justify-center h-full gap-1 opacity-40"><FileCode size={16}/><span className="text-[7px] uppercase font-black">File</span></div>}
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                                <div className={`px-6 py-4 text-[14px] leading-relaxed font-bold border transition-all ${isDark ? 'bg-[#121217] border-white/5 text-slate-100 rounded-[28px] rounded-tr-none shadow-2xl' : 'bg-white border-black/[0.03] text-slate-800 rounded-[28px] rounded-tr-none shadow-xl shadow-black/5'}`}>
-                                    {msg.content}
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="flex flex-col gap-6 w-full max-w-full pl-2">
-                                {msg.thoughts && (
-                                    <div className={`relative p-5 rounded-3xl border transition-all duration-700 group/logic ${isDark ? 'bg-primary-500/[0.02] border-primary-500/10 hover:border-primary-500/30' : 'bg-primary-50/20 border-primary-100/50 hover:border-primary-200'}`}>
-                                        <div className="flex items-center gap-4 mb-4">
-                                            <div className="flex items-center gap-3 text-[9px] font-black uppercase tracking-[0.2em] text-primary-500/60">
-                                                <div className="w-2 h-2 rounded-full bg-primary-600/40 animate-ping" />
-                                                Logic Stream
-                                            </div>
-                                            <div className="flex-1 h-[1px] bg-primary-500/10" />
-                                            <div className="text-[8px] font-mono opacity-20 group-hover/logic:opacity-60 transition-opacity uppercase">Agent reasoning</div>
-                                        </div>
-                                        <div className={`text-[12px] leading-relaxed font-medium italic font-mono space-y-2 transition-colors ${isDark ? 'text-slate-400 group-hover/logic:text-slate-300' : 'text-slate-500 group-hover/logic:text-slate-800'}`}>
-                                            <ReactMarkdown className="prose-slate">{msg.thoughts}</ReactMarkdown>
-                                        </div>
-                                        <div className={`absolute -inset-[1px] rounded-3xl bg-gradient-to-br transition-opacity duration-700 pointer-events-none opacity-0 group-hover/logic:opacity-100 ${isDark ? 'from-primary-500/5 via-transparent to-transparent' : 'from-primary-500/5 via-transparent to-transparent'}`} />
-                                    </div>
-                                )}
-
-                                {msg.tool_calls && msg.tool_calls.map((tc, j) => (
-                                    <div key={j} className={`w-full max-w-[95%] p-4 rounded-2xl border transition-all ${isDark ? 'bg-slate-900/40 border-slate-800 hover:border-slate-700 shadow-inner' : 'bg-slate-50/50 border-slate-200 hover:border-slate-300 shadow-sm'}`}>
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-3">
-                                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${tc.result ? 'bg-green-500/10 text-green-500' : 'bg-primary-500/10 text-primary-500'}`}>
-                                                    <Cpu size={16} className={tc.result ? '' : 'animate-pulse'} />
-                                                </div>
-                                                <div>
-                                                    <p className={`text-[10px] font-black uppercase tracking-widest ${tc.result ? 'text-green-500' : 'text-primary-500'}`}>{tc.tool}</p>
-                                                    <p className="text-[9px] opacity-40 font-mono">{tc.result ? 'COMPLETED' : 'EXECUTING...'}</p>
-                                                </div>
-                                            </div>
-                                            {!tc.result && <div className="flex gap-1"><div className="w-1 h-1 bg-primary-500 rounded-full animate-bounce" /><div className="w-1 h-1 bg-primary-500 rounded-full animate-bounce [animation-delay:0.2s]" /><div className="w-1 h-1 bg-primary-500 rounded-full animate-bounce [animation-delay:0.4s]" /></div>}
-                                        </div>
-                                        {tc.args && (
-                                            <div className={`mt-3 p-3 rounded-lg font-mono text-[10px] overflow-x-auto whitespace-pre ${isDark ? 'bg-black/40 text-slate-400' : 'bg-white/80 text-slate-500 border border-slate-100'}`}>
-                                                {JSON.stringify(tc.args, null, 2)}
-                                            </div>
-                                        )}
-                                        {tc.result && tc.result.error && (
-                                            <div className="mt-2 p-3 rounded-lg bg-red-500/5 border border-red-500/10 text-red-500 text-[10px] font-bold">
-                                                ERROR: {tc.result.error}
-                                            </div>
-                                        )}
-                                    </div>
-                                ))}
-
-                                {msg.screenshots && msg.screenshots.length > 0 && (
-                                    <div className="flex flex-wrap gap-4">
-                                        {msg.screenshots.map((s, j) => (
-                                            <div key={j} className="group relative overflow-hidden rounded-2xl border border-white/5 shadow-2xl transition-all hover:scale-[1.02]">
-                                                <img src={s} alt="Workspace Result" className="max-w-[420px] h-auto object-contain cursor-zoom-in" />
-                                                <div className="absolute top-4 left-4 px-3 py-1.5 bg-black/60 backdrop-blur-md rounded-lg text-[9px] text-white flex items-center gap-2 font-black uppercase tracking-widest border border-white/10 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                    <Monitor size={12} className="text-primary-500" /> LIVE_SNAPSHOT_{j}
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-
-                                {msg.content && (
-                                    <div className={`prose prose-sm max-w-none prose-p:leading-[1.8] prose-p:text-[15px] prose-p:font-semibold prose-strong:text-primary-600 transition-colors ${isDark ? 'prose-invert text-slate-200' : 'text-slate-800'}`}>
-                                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
-                                            code({node, inline, className, children, ...props}) {
-                                                const match = /language-(\w+)/.exec(className || '')
-                                                return !inline && match ? (
-                                                    <div className="relative group/code mt-5 mb-5 rounded-2xl overflow-hidden border border-white/5 shadow-2xl">
-                                                        <div className="absolute top-0 right-0 px-3 py-1.5 bg-white/5 backdrop-blur-md text-[9px] font-black uppercase tracking-widest opacity-40 z-10">{match[1]}</div>
-                                                        <SyntaxHighlighter style={isDark ? vscDarkPlus : oneLight} language={match[1]} PreTag="div" className="!m-0 !p-6 !text-[13px] !bg-transparent" {...props}>
-                                                            {String(children).replace(/\n$/, '')}
-                                                        </SyntaxHighlighter>
-                                                    </div>
-                                                ) : (
-                                                    <code className={`px-1.5 py-0.5 rounded-md font-bold ${isDark ? 'bg-white/5 text-primary-400' : 'bg-black/5 text-primary-600'}`} {...props}>{children}</code>
-                                                )
-                                            }
-                                        }}>{msg.content}</ReactMarkdown>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-
+                    ))
+                )}
+                
+                {agentStatus && (
+                    <div className="flex items-center gap-4 px-6 py-3 rounded-full border border-primary-500/20 bg-primary-500/5 text-primary-500 text-[11px] font-black uppercase tracking-[0.2em] w-fit animate-pulse shadow-2xl shadow-primary-900/20 backdrop-blur-xl border-l-[3px] border-primary-500">
+                      <div className="relative">
+                        <Cpu size={16} className="animate-spin-slow" />
+                        <div className="absolute inset-0 bg-primary-500 blur-md opacity-40 animate-pulse" />
+                      </div>
+                      <span className="opacity-80 transition-all">{agentStatus}</span>
                     </div>
-                ))}
-                <div ref={messagesEndRef} className="h-4" />
+                )}
+                
+                <div ref={messagesEndRef} className="h-12" />
             </div>
             <div className="p-8 pb-12 pt-4 relative">
                 {showMentions && mentionFiles.length > 0 && (
@@ -1036,7 +1144,7 @@ export default function Project() {
                                     <div className="space-y-1">
                                         {[
                                             { id: 'media', label: 'Media', icon: ImageIcon, color: 'text-orange-500', action: () => document.getElementById('media-upload').click() },
-                                            { id: 'mentions', label: 'Mentions', icon: AtSign, color: 'text-indigo-500', action: () => { setChatInput(p => p + '@'); setIsContextOpen(false); chatInputRef.current.focus(); } },
+                                            { id: 'mentions', label: 'Mentions', icon: AtSign, color: 'text-primary-500', action: () => { setChatInput(p => p + '@'); setIsContextOpen(false); chatInputRef.current.focus(); } },
                                             { id: 'workflows', label: 'Workflows', icon: SquareSlash, color: 'text-primary-500', action: () => { setChatInput(p => p + '/'); setIsContextOpen(false); chatInputRef.current.focus(); } }
                                         ].map(item => (
                                             <button key={item.id} onClick={(e) => { e.stopPropagation(); item.action(); }} className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl transition-all ${isDark ? 'hover:bg-white/5 text-slate-300 hover:text-white' : 'hover:bg-black/5 text-slate-700 hover:text-black font-bold'}`}><div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isDark ? 'bg-white/5' : 'bg-black/5'}`}><item.icon size={18} className={item.color} /></div><span className="text-[13px]">{item.label}</span></button>
