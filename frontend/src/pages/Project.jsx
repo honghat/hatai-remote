@@ -339,6 +339,8 @@ export default function Project() {
     } catch (err) { alert('Upload failed') } finally { setIsUploadingMedia(false) }
   }
 
+  const [agentStatus, setAgentStatus] = useState(null)
+
   const handleSendChat = async () => {
     if (!chatInput.trim() || isChatStreaming) return
     const userMsg = chatInput.trim()
@@ -346,95 +348,119 @@ export default function Project() {
     setAttachments([]) // Clear current staging
     setChatMessages(prev => [...prev, { role: 'user', content: userMsg, attachments: [...attachments] }])
     
-    // PREPEND active file context for higher priority in LLM attention
-    const contextPrefix = activeTab && editingContents[activeTab] ? `[CONTEXT: ACTIVE_FILE_FOCUS]\nFILE: ${activeTab}\nCONTENT:\n${editingContents[activeTab]}\n[/CONTEXT]\n\n` : ''
+    // PREPEND active file context
+    const contextPrefix = activeTab && editingContents[activeTab] ? `[ACTIVE_FILE: ${activeTab}]\n` : ''
     const fullMsg = contextPrefix + userMsg
 
-    // DETECT BACKGROUND TASK DELEGATION
-    if (userMsg.toLowerCase().startsWith('/task') || userMsg.toLowerCase().startsWith('!task')) {
-       // Delegate to AgentDaemon!
-       try {
-           setIsChatStreaming(true)
-           setChatMessages(prev => [...prev, { role: 'assistant', thoughts: 'Initializing background execution protocol...', content: '> DELEGATING TO AGENT_DAEMON.\n> Task ID: ' + Math.random().toString(36).substring(7).toUpperCase() }])
-           await api.post('/ai/agent/task', { 
-               task: userMsg.replace(/^\/(task|!task)\s*/i, ''),
-               session_id: null // Or current session
-           })
-           // Agent will report back via database/pulse telemetry
-       } catch (err) { alert('Task delegation failed') } finally { setIsChatStreaming(false) }
-       return
-    }
-
     setIsChatStreaming(true)
+    setAgentStatus('🚀 Khởi tạo Agent...')
+    
     try {
-        const response = await fetch('/api/ai/chat/stream', {
+        const response = await fetch('/api/agent/run', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('hatai_token')}` },
+            headers: { 
+                'Content-Type': 'application/json', 
+                'Authorization': `Bearer ${localStorage.getItem('hatai_token')}` 
+            },
             body: JSON.stringify({ 
                 message: fullMsg, 
-                model: selectedModel,
+                session_id: activeSessionId,
                 attachments: attachments
             })
         })
+        
+        if (!response.ok) throw new Error('Agent failed to start')
+
         const reader = response.body.getReader()
         const decoder = new TextDecoder()
-        let assistantMsg = { role: 'assistant', content: '', thoughts: '' }
+        
+        let assistantMsg = { 
+            role: 'assistant', 
+            content: '', 
+            thoughts: '', 
+            tool_calls: [], 
+            screenshots: [] 
+        }
+        
         setChatMessages(prev => [...prev, assistantMsg])
         
         let lastUpdateTime = Date.now()
-        let isThinking = false
+        let currentToolCall = null
 
         while (true) {
             const { done, value } = await reader.read()
             if (done) break
             const chunk = decoder.decode(value)
             const lines = chunk.split('\n')
+            
             for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                    try {
-                        const data = JSON.parse(line.substring(6))
-                        if (data.type === 'token') {
-                            const token = data.content
-                            
-                            if (token.includes('<think>')) isThinking = true
-                            if (token.includes('</think>')) { isThinking = false; assistantMsg.thoughts += token.replace('</think>', ''); continue; }
-
-                            if (isThinking) {
-                                assistantMsg.thoughts += token.replace('<think>', '')
-                            } else {
-                                assistantMsg.content += token
-                                // AUTO-STREAM TO EDITOR
-                                if (activeTab && assistantMsg.content.includes('```')) {
-                                   // A simple heuristic to detect code blocks intended for the editor
-                                   const lines = assistantMsg.content.split('\n')
-                                   const currentBlock = lines.slice(lines.lastIndexOf(lines.find(l => l.startsWith('```'))) + 1).join('\n')
-                                   if (!currentBlock.includes('```')) {
-                                       setProposingContents(prev => ({ ...prev, [activeTab]: currentBlock }))
-                                   }
-                                }
-                            }
-
-                            const now = Date.now()
-                            if (now - lastUpdateTime > 50) { // Update UI every 50ms
-                                setChatMessages(prev => {
-                                    const next = [...prev]
-                                    next[next.length - 1] = { ...assistantMsg }
-                                    return next
-                                })
-                                lastUpdateTime = now
-                            }
+                if (!line.startsWith('data: ')) continue
+                
+                try {
+                    const data = JSON.parse(line.substring(6))
+                    
+                    if (data.type === 'session') {
+                        if (!activeSessionId) {
+                            setActiveSessionId(data.session_id)
+                            localStorage.setItem('hatai_session_id', data.session_id)
                         }
-                    } catch (e) {}
-                }
+                    } else if (data.type === 'thinking_token') {
+                        assistantMsg.thoughts += data.content
+                    } else if (data.type === 'tool_call') {
+                        currentToolCall = { tool: data.tool, args: data.args, result: null }
+                        assistantMsg.tool_calls.push(currentToolCall)
+                        setAgentStatus(`⚙️ Đang chạy: ${data.tool}...`)
+                    } else if (data.type === 'tool_result') {
+                        if (currentToolCall) {
+                            currentToolCall.result = data.result
+                            setAgentStatus(`✅ Hoàn thành: ${data.tool}`)
+                        }
+                    } else if (data.type === 'screenshot') {
+                        assistantMsg.screenshots.push(data.url)
+                    } else if (data.type === 'text') {
+                        const token = data.content
+                        assistantMsg.content += token
+                        
+                        // MAGIC EDIT: Live stream to editor
+                        if (activeTab && assistantMsg.content.includes('```')) {
+                           const codeLines = assistantMsg.content.split('\n')
+                           const blockStart = codeLines.lastIndexOf(codeLines.find(l => l.startsWith('```')))
+                           if (blockStart !== -1) {
+                               const currentBlock = codeLines.slice(blockStart + 1).join('\n')
+                               if (!currentBlock.includes('```')) {
+                                   setProposingContents(prev => ({ ...prev, [activeTab]: currentBlock }))
+                               }
+                           }
+                        }
+                    } else if (data.type === 'done') {
+                        setAgentStatus(null)
+                    }
+
+                    const now = Date.now()
+                    if (now - lastUpdateTime > 30) {
+                        setChatMessages(prev => {
+                            const next = [...prev]
+                            next[next.length - 1] = { ...assistantMsg }
+                            return next
+                        })
+                        lastUpdateTime = now
+                    }
+                } catch (e) {}
             }
         }
-        // Final update to ensure everything is rendered
+        
+        // Final UI sync
         setChatMessages(prev => {
             const next = [...prev]
             next[next.length - 1] = { ...assistantMsg }
             return next
         })
-    } catch (err) {} finally { setIsChatStreaming(false); }
+    } catch (err) {
+        setChatMessages(prev => [...prev, { role: 'assistant', content: `❌ Lỗi: ${err.message}` }])
+    } finally { 
+        setIsChatStreaming(false)
+        setAgentStatus(null)
+    }
   }
 
   const messagesEndRef = useRef(null)
@@ -703,9 +729,9 @@ export default function Project() {
                                 </div>
 
                                 <div className="space-y-2">
-                                    <p className="text-[9px] font-black uppercase tracking-widest opacity-20 mb-4 px-1">Changes ({gitStatus.files.length})</p>
+                                    <p className="text-[9px] font-black uppercase tracking-widest opacity-20 mb-4 px-1">Changes ({gitStatus.files.filter(f => /\.(js|jsx|ts|tsx|py|html|css|json|md|c|cpp|h|go|rs|php|rb|sh|yml|yaml|sql|txt)$/i.test(f.file)).length})</p>
                                     <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
-                                        {gitStatus.files.map(f => (
+                                        {gitStatus.files.filter(f => /\.(js|jsx|ts|tsx|py|html|css|json|md|c|cpp|h|go|rs|php|rb|sh|yml|yaml|sql|txt)$/i.test(f.file)).map(f => (
                                             <div key={f.file} onClick={() => handleOpenFile(f.file)} className={`group flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer ${isDark ? 'bg-white/[0.02] border-white/5 hover:bg-white/5' : 'bg-white/40 border-black/[0.02] hover:bg-white shadow-sm'}`}>
                                                 <div className="flex items-center gap-3 truncate">
                                                     <FileCode size={14} className="opacity-30 group-hover:text-primary-500 transition-colors" />
@@ -859,27 +885,22 @@ export default function Project() {
                         </div>
 
                         {msg.role === 'user' ? (
-                            <div className="flex flex-col items-end gap-5 max-w-[90%]">
+                            <div className="flex flex-col items-end gap-3 max-w-[90%]">
                                 {msg.attachments && msg.attachments.length > 0 && (
-                                    <div className="flex flex-wrap gap-4 justify-end">
+                                    <div className="flex flex-wrap gap-2 justify-end mb-2">
                                         {msg.attachments.map((file, idx) => (
-                                            <div key={idx} className={`relative group max-w-[220px] rounded-2xl overflow-hidden shadow-2xl transition-all duration-500 hover:scale-[1.05] hover:rotate-1 ${isDark ? 'ring-1 ring-white/10' : 'ring-1 ring-black/5'}`}>
-                                                {file.type?.startsWith('image') ? (
-                                                    <img src={file.url} className="w-full object-cover aspect-square bg-[#0c0c0e]" alt="Context" />
-                                                ) : (
-                                                    <div className="p-8 flex flex-col items-center justify-center gap-3 bg-[#0c0c0e]/40 backdrop-blur-md"><FileCode size={32} className="text-primary-500" /><span className="text-[10px] font-black opacity-30 tracking-[0.2em]">{file.name?.split('.').pop().toUpperCase()}</span></div>
-                                                )}
-                                                <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                                            <div key={idx} className={`relative group w-16 h-16 rounded-xl overflow-hidden border ${isDark ? 'border-white/10' : 'border-black/10'}`}>
+                                                {file.type?.startsWith('image') ? <img src={file.url} className="w-full h-full object-cover" /> : <div className="flex flex-col items-center justify-center h-full gap-1 opacity-40"><FileCode size={16}/><span className="text-[7px] uppercase font-black">File</span></div>}
                                             </div>
                                         ))}
                                     </div>
                                 )}
-                                <div className={`px-8 py-6 text-[15px] leading-relaxed font-bold border ${isDark ? 'bg-[#121217] border-white/5 text-slate-100 rounded-[35px] rounded-tr-none shadow-2xl shadow-black/80' : 'bg-white border-black/[0.03] text-slate-800 rounded-[35px] rounded-tr-none shadow-xl shadow-black/5'}`}>
+                                <div className={`px-6 py-4 text-[14px] leading-relaxed font-bold border transition-all ${isDark ? 'bg-[#121217] border-white/5 text-slate-100 rounded-[28px] rounded-tr-none shadow-2xl' : 'bg-white border-black/[0.03] text-slate-800 rounded-[28px] rounded-tr-none shadow-xl shadow-black/5'}`}>
                                     {msg.content}
                                 </div>
                             </div>
                         ) : (
-                            <div className="flex flex-col gap-8 w-full max-w-full pl-2">
+                            <div className="flex flex-col gap-6 w-full max-w-full pl-2">
                                 {msg.thoughts && (
                                     <div className={`relative p-5 rounded-3xl border transition-all duration-700 group/logic ${isDark ? 'bg-primary-500/[0.02] border-primary-500/10 hover:border-primary-500/30' : 'bg-primary-50/20 border-primary-100/50 hover:border-primary-200'}`}>
                                         <div className="flex items-center gap-4 mb-4">
@@ -888,51 +909,77 @@ export default function Project() {
                                                 Logic Stream
                                             </div>
                                             <div className="flex-1 h-[1px] bg-primary-500/10" />
-                                            <div className="text-[8px] font-mono opacity-20 group-hover/logic:opacity-60 transition-opacity">DIAGNOSTIC_LOG_V2.0</div>
+                                            <div className="text-[8px] font-mono opacity-20 group-hover/logic:opacity-60 transition-opacity uppercase">Agent reasoning</div>
                                         </div>
-                                        <div className={`text-[13px] leading-relaxed font-medium italic font-mono space-y-2 transition-colors ${isDark ? 'text-slate-400 group-hover/logic:text-slate-300' : 'text-slate-500 group-hover/logic:text-slate-800'}`}>
-                                            {msg.thoughts.replace(/<\/?think>/gi,'').split('\n').map((line, idx) => (
-                                                <p key={idx} className="relative pl-5 before:content-['>'] before:absolute before:left-0 before:opacity-30 before:text-[10px]">{line}</p>
-                                            ))}
+                                        <div className={`text-[12px] leading-relaxed font-medium italic font-mono space-y-2 transition-colors ${isDark ? 'text-slate-400 group-hover/logic:text-slate-300' : 'text-slate-500 group-hover/logic:text-slate-800'}`}>
+                                            <ReactMarkdown className="prose-slate">{msg.thoughts}</ReactMarkdown>
                                         </div>
-                                        <div className={`absolute -inset-[1px] rounded-3xl bg-gradient-to-br transition-opacity duration-700 pointer-events-none opacity-0 group-hover/logic:opacity-100 ${isDark ? 'from-primary-500/10 via-transparent to-transparent' : 'from-primary-500/5 via-transparent to-transparent'}`} />
+                                        <div className={`absolute -inset-[1px] rounded-3xl bg-gradient-to-br transition-opacity duration-700 pointer-events-none opacity-0 group-hover/logic:opacity-100 ${isDark ? 'from-primary-500/5 via-transparent to-transparent' : 'from-primary-500/5 via-transparent to-transparent'}`} />
                                     </div>
                                 )}
-                                <div className={`prose prose-sm max-w-none prose-p:leading-[1.9] prose-p:text-[15px] prose-p:font-semibold prose-strong:text-primary-600 transition-colors ${isDark ? 'prose-invert text-slate-200' : 'text-slate-800'}`}>
-                                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
-                                        code({node, inline, className, children, ...props}) {
-                                            const match = /language-(\w+)/.exec(className || '')
-                                            return !inline && match ? (
-                                                <SyntaxHighlighter style={isDark ? vscDarkPlus : oneLight} language={match[1]} PreTag="div" {...props}>
-                                                    {String(children).replace(/\n$/, '')}
-                                                </SyntaxHighlighter>
-                                            ) : (
-                                                <code className={className} {...props}>{children}</code>
-                                            )
-                                        }
-                                    }}>{msg.content}</ReactMarkdown>
-                                </div>
-                                {msg.meta && msg.meta.type === 'edit' && (
-                                    <div className={`p-8 rounded-[40px] border shadow-2xl space-y-5 group/proposal overflow-hidden relative ${isDark ? 'bg-[#0f0f12] border-white/10 shadow-black' : 'bg-white border-black/[0.05] shadow-black/5'}`}>
-                                        <div className="flex items-center justify-between font-black text-[9px] uppercase tracking-[0.4em] text-primary-600 opacity-60">
-                                            <span>IDE Reconstruction Protocol</span>
-                                            <div className="flex items-center gap-1.5"><Activity size={10} className="animate-pulse" /> Live</div>
-                                        </div>
-                                        <div className="flex items-center gap-4 p-4 rounded-2xl bg-black/5 dark:bg-white/5 border border-white/5">
-                                            <FileCode size={24} className="text-primary-500" />
-                                            <div className="flex-1 min-w-0">
-                                                <p className="text-[12px] font-black truncate">{msg.meta.files[0]}</p>
-                                                <p className="text-[9px] font-mono opacity-20 uppercase tracking-widest mt-1">Pending approval</p>
+
+                                {msg.tool_calls && msg.tool_calls.map((tc, j) => (
+                                    <div key={j} className={`w-full max-w-[95%] p-4 rounded-2xl border transition-all ${isDark ? 'bg-slate-900/40 border-slate-800 hover:border-slate-700 shadow-inner' : 'bg-slate-50/50 border-slate-200 hover:border-slate-300 shadow-sm'}`}>
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${tc.result ? 'bg-green-500/10 text-green-500' : 'bg-primary-500/10 text-primary-500'}`}>
+                                                    <Cpu size={16} className={tc.result ? '' : 'animate-pulse'} />
+                                                </div>
+                                                <div>
+                                                    <p className={`text-[10px] font-black uppercase tracking-widest ${tc.result ? 'text-green-500' : 'text-primary-500'}`}>{tc.tool}</p>
+                                                    <p className="text-[9px] opacity-40 font-mono">{tc.result ? 'COMPLETED' : 'EXECUTING...'}</p>
+                                                </div>
                                             </div>
+                                            {!tc.result && <div className="flex gap-1"><div className="w-1 h-1 bg-primary-500 rounded-full animate-bounce" /><div className="w-1 h-1 bg-primary-500 rounded-full animate-bounce [animation-delay:0.2s]" /><div className="w-1 h-1 bg-primary-500 rounded-full animate-bounce [animation-delay:0.4s]" /></div>}
                                         </div>
-                                        <button onClick={() => msg.meta.files.forEach(f => handleSaveFile(f))} className="w-full h-14 bg-primary-600 hover:bg-primary-500 text-white rounded-[22px] text-[12px] font-black uppercase tracking-[0.3em] shadow-2xl shadow-primary-900/40 hover:shadow-primary-500/40 active:scale-[0.98] transition-all flex items-center justify-center gap-4 group">
-                                            Apply Protocol <ArrowRight size={18} className="transition-transform group-hover:translate-x-1" />
-                                        </button>
-                                        <div className="absolute top-0 right-0 w-24 h-24 bg-primary-600/10 blur-[60px] pointer-events-none" />
+                                        {tc.args && (
+                                            <div className={`mt-3 p-3 rounded-lg font-mono text-[10px] overflow-x-auto whitespace-pre ${isDark ? 'bg-black/40 text-slate-400' : 'bg-white/80 text-slate-500 border border-slate-100'}`}>
+                                                {JSON.stringify(tc.args, null, 2)}
+                                            </div>
+                                        )}
+                                        {tc.result && tc.result.error && (
+                                            <div className="mt-2 p-3 rounded-lg bg-red-500/5 border border-red-500/10 text-red-500 text-[10px] font-bold">
+                                                ERROR: {tc.result.error}
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+
+                                {msg.screenshots && msg.screenshots.length > 0 && (
+                                    <div className="flex flex-wrap gap-4">
+                                        {msg.screenshots.map((s, j) => (
+                                            <div key={j} className="group relative overflow-hidden rounded-2xl border border-white/5 shadow-2xl transition-all hover:scale-[1.02]">
+                                                <img src={s} alt="Workspace Result" className="max-w-[420px] h-auto object-contain cursor-zoom-in" />
+                                                <div className="absolute top-4 left-4 px-3 py-1.5 bg-black/60 backdrop-blur-md rounded-lg text-[9px] text-white flex items-center gap-2 font-black uppercase tracking-widest border border-white/10 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <Monitor size={12} className="text-primary-500" /> LIVE_SNAPSHOT_{j}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {msg.content && (
+                                    <div className={`prose prose-sm max-w-none prose-p:leading-[1.8] prose-p:text-[15px] prose-p:font-semibold prose-strong:text-primary-600 transition-colors ${isDark ? 'prose-invert text-slate-200' : 'text-slate-800'}`}>
+                                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
+                                            code({node, inline, className, children, ...props}) {
+                                                const match = /language-(\w+)/.exec(className || '')
+                                                return !inline && match ? (
+                                                    <div className="relative group/code mt-5 mb-5 rounded-2xl overflow-hidden border border-white/5 shadow-2xl">
+                                                        <div className="absolute top-0 right-0 px-3 py-1.5 bg-white/5 backdrop-blur-md text-[9px] font-black uppercase tracking-widest opacity-40 z-10">{match[1]}</div>
+                                                        <SyntaxHighlighter style={isDark ? vscDarkPlus : oneLight} language={match[1]} PreTag="div" className="!m-0 !p-6 !text-[13px] !bg-transparent" {...props}>
+                                                            {String(children).replace(/\n$/, '')}
+                                                        </SyntaxHighlighter>
+                                                    </div>
+                                                ) : (
+                                                    <code className={`px-1.5 py-0.5 rounded-md font-bold ${isDark ? 'bg-white/5 text-primary-400' : 'bg-black/5 text-primary-600'}`} {...props}>{children}</code>
+                                                )
+                                            }
+                                        }}>{msg.content}</ReactMarkdown>
                                     </div>
                                 )}
                             </div>
                         )}
+
                     </div>
                 ))}
                 <div ref={messagesEndRef} className="h-4" />

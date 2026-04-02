@@ -131,7 +131,9 @@ def _auto_index_content(content: str, source: str, topic: str = None) -> str:
 # ── Tool Definitions (for the LLM prompt) ──────────────────────────────────
 
 TOOL_DEFINITIONS = """
-FILE: run_command{command,cwd?} | read_file{path} | analyze_document{path,focus?} | write_file{path,content} | edit_file{path,old_text,new_text} | replace_lines{path,start_line,end_line,new_text} | list_dir{path} | search_code{query,path} | find_files{pattern,path}
+FILE: run_command{command,cwd?} | read_file{path,start_line?,end_line?} → supports line ranges for precise reading | write_file{path,content} | edit_file{path,old_text,new_text} | multi_edit_file{path,edits:[{old_text,new_text},...]} → multiple edits at once | replace_lines{path,start_line,end_line,new_text} | list_dir{path} | search_code{query,path,include?} | find_files{pattern,path} | project_tree{path?,depth?} → show project structure
+GIT: git_ops{action,cwd?,message?,file?,branch?,target?,n?,staged?} → actions: status|diff|log|commit|push|pull|branch|stash|checkout
+DOCS: analyze_document{path,focus?}
 SEARCH: deep_search{query,max_results?} → ALWAYS use this for any search/research request. Searches Google, crawls every result link, extracts full content, returns everything for you to summarize.
 BROWSER: browser_go{url} | open_browser{url} | browser_close_tab{which?,url?} | browser_read{} | browser_click{selector} | browser_type{selector,text} | browser_js{script} | browser_wait{seconds?} | browser_extract{selector,attribute?} | browser_extract_prices{} | site_search{site,query}
 DESKTOP: screenshot{} | sys_mouse{x,y,action?,amount?,drag_to_x?,drag_to_y?} | sys_type{text,app?,telex?} → telex=true for Vietnamese Telex IME | sys_key{key,modifiers?,app?} | sys_open_app{app_name} | sys_get_active_app{}
@@ -277,15 +279,43 @@ def tool_read_file(args: Dict[str, Any]) -> Dict[str, Any]:
         # ── Default Text Support ─────────
         else:
             with open(path, "r", encoding="utf-8", errors="replace") as f:
-                content = f.read()
-                
+                all_lines = f.readlines()
+
+            total_lines = len(all_lines)
+            start_line = args.get("start_line")
+            end_line = args.get("end_line")
+
+            # Support line range reading (1-indexed, inclusive)
+            if start_line or end_line:
+                s = max(1, int(start_line or 1)) - 1
+                e = min(total_lines, int(end_line or total_lines))
+                selected = all_lines[s:e]
+                numbered = []
+                for i, line in enumerate(selected, start=s + 1):
+                    numbered.append(f"{i:4d} | {line.rstrip()}")
+                content = "\n".join(numbered)
+                return {
+                    "content": content,
+                    "path": path,
+                    "type": ext,
+                    "total_lines": total_lines,
+                    "showing": f"lines {s+1}-{e} of {total_lines}",
+                }
+            else:
+                content = "".join(all_lines)
+                # For code files, add total_lines info
+                extra = {"total_lines": total_lines} if total_lines > 0 else {}
+
         # Truncate very large files (30k chars for docs, it's safer)
         # Skip truncation if requested by analyze_document
         no_truncate = args.get("no_truncate", False)
         if not no_truncate and len(content) > 30000:
             content = content[:30000] + f"\n\n... [truncated, total {len(content)} chars]"
-            
-        return {"content": content, "path": path, "type": ext}
+
+        result = {"content": content, "path": path, "type": ext}
+        if 'extra' in dir() and extra:
+            result.update(extra)
+        return result
         
     except Exception as e:
         logger.error(f"Error reading file {path}: {e}")
@@ -3155,6 +3185,158 @@ def tool_antigravity(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": f"Antigravity error: {str(e)}"}
 
 
+def tool_project_tree(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Show project directory tree structure."""
+    path = args.get("path") or os.path.expanduser("~/Public/hatai-remote")
+    max_depth = int(args.get("depth") or 3)
+
+    if not _check_path(path):
+        return {"error": f"Path not allowed: {path}"}
+
+    logger.info(f"🌳 Project tree: {path} (depth={max_depth})")
+    try:
+        cmd = f"find {path} -maxdepth {max_depth} -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/__pycache__/*' -not -path '*/.venv/*' -not -path '*/dist/*' -not -name '.DS_Store' -not -name '*.pyc' | sort"
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+
+        lines = result.stdout.strip().split('\n')
+        base = path.rstrip('/')
+        tree_lines = []
+        for line in lines[:300]:
+            if not line.strip():
+                continue
+            rel = line.replace(base, '').lstrip('/')
+            if not rel:
+                tree_lines.append(f"📁 {os.path.basename(base)}/")
+                continue
+            depth = rel.count('/')
+            name = os.path.basename(rel)
+            prefix = "  " * depth
+            is_dir = os.path.isdir(line)
+            icon = "📁" if is_dir else "📄"
+            tree_lines.append(f"{prefix}{icon} {name}")
+
+        return {"tree": "\n".join(tree_lines), "path": path, "total_items": len(lines)}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def tool_git_ops(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Perform git operations."""
+    action = args.get("action") or ""
+    cwd = args.get("cwd") or os.path.expanduser("~/Public/hatai-remote")
+
+    if not action:
+        return {"error": "action required: status|diff|log|commit|push|pull|branch|stash|checkout"}
+
+    logger.info(f"🔀 Git: {action} in {cwd}")
+    try:
+        if action == "status":
+            r = subprocess.run(["git", "status", "--short"], capture_output=True, text=True, cwd=cwd, timeout=15)
+            b = subprocess.run(["git", "branch", "--show-current"], capture_output=True, text=True, cwd=cwd, timeout=5)
+            return {"branch": b.stdout.strip(), "status": r.stdout.strip(), "clean": not r.stdout.strip()}
+
+        elif action == "diff":
+            fp = args.get("file") or ""
+            cmd = ["git", "diff"]
+            if args.get("staged"):
+                cmd.append("--staged")
+            if fp:
+                cmd.append(fp)
+            r = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd, timeout=15)
+            return {"diff": r.stdout[:8000]}
+
+        elif action == "log":
+            n = int(args.get("n") or 10)
+            r = subprocess.run(["git", "log", f"-{n}", "--oneline", "--graph"], capture_output=True, text=True, cwd=cwd, timeout=15)
+            return {"log": r.stdout.strip()}
+
+        elif action == "commit":
+            msg = args.get("message") or "auto-commit"
+            subprocess.run(["git", "add", "."], capture_output=True, cwd=cwd, timeout=15)
+            r = subprocess.run(["git", "commit", "-m", msg], capture_output=True, text=True, cwd=cwd, timeout=15)
+            return {"stdout": r.stdout.strip(), "stderr": r.stderr.strip(), "exit_code": r.returncode}
+
+        elif action == "push":
+            branch = args.get("branch") or ""
+            cmd = ["git", "push"]
+            if branch:
+                cmd.extend(["origin", branch])
+            r = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd, timeout=30)
+            return {"stdout": r.stdout.strip(), "stderr": r.stderr.strip(), "exit_code": r.returncode}
+
+        elif action == "pull":
+            r = subprocess.run(["git", "pull"], capture_output=True, text=True, cwd=cwd, timeout=30)
+            return {"stdout": r.stdout.strip(), "stderr": r.stderr.strip(), "exit_code": r.returncode}
+
+        elif action == "branch":
+            name = args.get("name") or ""
+            if name:
+                r = subprocess.run(["git", "checkout", "-b", name], capture_output=True, text=True, cwd=cwd, timeout=15)
+            else:
+                r = subprocess.run(["git", "branch", "-a"], capture_output=True, text=True, cwd=cwd, timeout=15)
+            return {"stdout": r.stdout.strip(), "exit_code": r.returncode}
+
+        elif action == "stash":
+            sub = args.get("sub") or "push"
+            r = subprocess.run(["git", "stash", sub], capture_output=True, text=True, cwd=cwd, timeout=15)
+            return {"stdout": r.stdout.strip(), "exit_code": r.returncode}
+
+        elif action == "checkout":
+            target = args.get("target") or ""
+            if not target:
+                return {"error": "target is required"}
+            r = subprocess.run(["git", "checkout", target], capture_output=True, text=True, cwd=cwd, timeout=15)
+            return {"stdout": r.stdout.strip(), "stderr": r.stderr.strip(), "exit_code": r.returncode}
+
+        else:
+            return {"error": f"Unknown git action: {action}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def tool_multi_edit_file(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Apply multiple non-contiguous edits to a single file in one operation.
+    edits: list of {old_text, new_text} pairs, applied in order.
+    """
+    path = args.get("path") or ""
+    edits = args.get("edits") or []
+
+    if not path:
+        return {"error": "path is required"}
+    if not edits or not isinstance(edits, list):
+        return {"error": "edits must be a list of {old_text, new_text} pairs"}
+    if not _check_path(path):
+        return {"error": f"Path not allowed: {path}"}
+    if not os.path.isfile(path):
+        return {"error": f"File not found: {path}"}
+
+    logger.info(f"✏️ Multi-edit: {path} ({len(edits)} edits)")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        applied = 0
+        errors = []
+        for i, edit in enumerate(edits):
+            old = edit.get("old_text", "")
+            new = edit.get("new_text", "")
+            if old not in content:
+                errors.append(f"Edit {i+1}: old_text not found")
+                continue
+            content = content.replace(old, new, 1)
+            applied += 1
+
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+        result = {"path": path, "applied": applied, "total": len(edits)}
+        if errors:
+            result["errors"] = errors
+        return result
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def tool_delete_all_tasks(args: Dict[str, Any]) -> Dict[str, Any]:
     """Delete all background tasks for the current user."""
     from db.psql.session import SessionLocal
@@ -3226,6 +3408,9 @@ TOOLS = {
     "antigravity": tool_antigravity,
     "create_background_task": tool_create_background_task,
     "delete_all_tasks": tool_delete_all_tasks,
+    "project_tree": tool_project_tree,
+    "git_ops": tool_git_ops,
+    "multi_edit_file": tool_multi_edit_file,
     "session_query": tool_session_query,
     "clear_session_rag": tool_clear_session_rag,
     # Office tools (Excel, Word, PowerPoint)

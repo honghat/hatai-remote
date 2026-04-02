@@ -159,7 +159,7 @@ Call tools using this exact format:
 - **Verify before presenting**: When extracting data from search results, cross-check across multiple sources. If sources conflict, present both with attribution.
 - **Cite sources**: Always include URLs when presenting factual information from the web.
 - **Be concise**: Give direct answers in your final response. No filler or unnecessary commentary.
-- **Persistence**: Keep working until the goal is 100% complete. If one approach fails, try another.
+- **Persistence (CRITICAL)**: Keep working until the goal is 100% complete. If one approach fails, try another. You are a background-capable agent; do NOT stop or ask for permission if the goal is not yet reached. Proceed until the task is verified done.
 - **Minimal tools**: Use the fewest tool calls needed. Don't call tools unnecessarily.
 
 # Internal Reasoning (Thinking)
@@ -198,6 +198,23 @@ Call tools using this exact format:
 - **NO FILLER**: In your **final response** (outside of thinking tags), do NOT say "Based on my research...", "Thought Process", or "Here is what I found...". Start directly with the information.
 - **NO REDUNDANCY**: The UI already displays your internal reasoning. Do NOT repeat your thought process in the final answer/output. Keep the final answer clean and result-oriented.
 - **Whitespace**: Use empty lines between sections to create a "breathable" design.
+
+# Professional Coding (CRITICAL for code tasks)
+- **READ BEFORE EDIT**: ALWAYS use `read_file` with `start_line`/`end_line` to read the specific section BEFORE editing. Never edit blind.
+- **Precise Edits**: Use `edit_file{path,old_text,new_text}` for single edits. Use `multi_edit_file{path,edits}` for multiple non-contiguous changes in one file.
+- **Verify After Edit**: After editing, use `read_file` to verify the change was applied correctly. If it broke syntax, fix immediately.
+- **Project Overview**: Use `project_tree{path,depth}` to understand file structure before diving into code.
+- **Search First**: Use `search_code{query,path}` to find where code is defined before modifying it. Don't guess file locations.
+- **Git Workflow**: Use `git_ops` for version control:
+  - `git_ops{action:"status"}` — check current state
+  - `git_ops{action:"diff",file:"path"}` — review changes before committing  
+  - `git_ops{action:"commit",message:"desc"}` — commit with clear message
+  - `git_ops{action:"push"}` — push to remote
+  - `git_ops{action:"log",n:5}` — check recent history
+- **Line Numbers Matter**: When reading code, use line ranges to focus on relevant sections. Don't read entire large files.
+- **Create Files**: Use `write_file{path,content}` to create new files. Create parent directories automatically.
+- **Run & Test**: After code changes, use `run_command` to test (e.g., `python -c "import module"`, `node -e "require('./file')"`, `npm run build`).
+- **Error Recovery**: If an edit fails (old_text not found), read the file again to see current content, then retry with correct text.
 
 # Document Analysis
 - For deep financial reports, long PDF, or large Excel files, use `analyze_document`.
@@ -916,7 +933,7 @@ Execute step 1 NOW. Call the tool."""
 
         docs_updated = False
         current_step = 0
-        continuation_budget = 8   # max consecutive continuations for one response
+        continuation_budget = 15   # max consecutive continuations for one response
         continuation_count = 0
         overflow_count = 0  # tracks consecutive context overflow retries
         malformed_count = 0  # tracks consecutive malformed tool call retries
@@ -1255,38 +1272,40 @@ Execute step 1 NOW. Call the tool."""
                 ]
 
                 clean_lower = clean.lower()
-                is_final = any(sig in clean_lower for sig in DONE_SIGNALS)
+                is_final_signal = any(sig in clean_lower for sig in DONE_SIGNALS)
                 is_refusal = any(sig in clean_lower for sig in REFUSAL_SIGNALS)
+                has_pending_steps = plan_steps and current_step < len(plan_steps)
 
-                # If the model is REFUSING a task it CAN do, override and force tool use
+                # Forced Auto-Continue if signal says done but plan is NOT done
+                if is_final_signal and has_pending_steps:
+                    logger.warning(f"🔄 Hallucinated completion at step {current_step+1}/{len(plan_steps)}. Forcing continuation.")
+                    yield {"type": "text", "content": "⚠️ Chưa hoàn thành mọi bước, đang yêu cầu Agent tiếp tục..."}
+                    messages.append({"role": "assistant", "content": resp})
+                    messages.append({"role": "user", "content": f"[System Override] You claimed to be finished, but you have NOT completed step {current_step+1}: {plan_steps[current_step]}. Continue with the code/task NOW. Do NOT summarize yet."})
+                    continue
+
                 if is_refusal and current_step == 0:
                     yield {"type": "text", "content": "⚠️ Model từ chối sai — đang hướng dẫn lại..."}
                     example = _suggest_tool_for_task(user_message, plan_steps, current_step)
                     messages.append({"role": "assistant", "content": resp})
-                    messages.append({"role": "user", "content":
-                        f"[System] WRONG. You DO have tools to perform this task. "
-                        f"You have browser tools (browser_go, browser_type, browser_click, browser_read), "
-                        f"desktop tools (sys_open_app, screenshot, sys_type, sys_key), "
-                        f"search tools (deep_search), and social tools (fb_message). "
-                        f"You CAN browse the web, open apps, send messages, and interact with websites. "
-                        f"Do NOT refuse. Use your tools NOW.\n"
-                        f"Example:\n```tool\n{example}\n```"})
+                    messages.append({"role": "user", "content": f"[System] You DO have tools (browser, system, search). Do NOT refuse. Use your tools NOW.\nExample:\n```tool\n{example}\n```"})
                     continue
 
                 if clean:
                     yield {"type": "text", "content": clean}
 
-                # If it's a final signal, or empty response, or just conversation without a task plan
-                # OR if it's a short response and we've already executed tools
-                if is_final or not clean or (not plan_steps and current_step > 0) or (not plan_steps and current_step == 0 and len(clean) > 0 and "```tool" not in clean):
+                # Comprehensive completion check
+                is_actually_done = (is_final_signal or not plan_steps) and not has_pending_steps
+                if is_actually_done and (clean or not plan_steps):
                     yield {"type": "done"}
                     return
                 else:
-                    if plan_steps and current_step < len(plan_steps):
-                        nudge = f"[System] Proceed to step {current_step + 1}: {plan_steps[current_step]}\nThink about what tool to use, then call it."
+                    if has_pending_steps:
+                        nudge = f"[System] {current_step}/{len(plan_steps)} steps done. Proceed to Step {current_step+1}: {plan_steps[current_step]}. Execute now."
                     else:
-                        nudge = "[System] No tool was called. If the task is complete, present your final answer in Vietnamese. If not, determine the next action and call the appropriate tool."
+                        nudge = "[System] Task appears incomplete. If finished, provide final summary in Vietnamese. If not, continue the logic flow."
                     
+                    logger.info(f"⏩ Auto-nudging agent... (pending={has_pending_steps})")
                     messages.append({"role": "assistant", "content": resp})
                     messages.append({"role": "user", "content": nudge})
                     continue
