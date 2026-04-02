@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HatAI Live Tracker</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            margin: 0;
+            padding: 10px;
+            width: 320px;
+            height: 400px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        h2 {
+            font-size: 14px;
+            margin: 0 0 10px 0;
+            color: #00BCD4;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background-color: red;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .status-dot.connected {
+            background-color: #4CAF50;
+            box-shadow: 0 0 5px #4CAF50;
+        }
+        #log-container {
+            flex: 1;
+            background: #252526;
+            border-radius: 6px;
+            padding: 8px;
+            overflow-y: auto;
+            font-size: 12px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            border: 1px solid #333;
+        }
+        .log-entry {
+            margin-bottom: 6px;
+            border-bottom: 1px solid #333;
+            padding-bottom: 6px;
+        }
+        .log-system { color: #f5f5f5; font-style: italic; }
+        .log-think { color: #ce9178; font-family: monospace; }
+        .log-tool { color: #4FC1FF; font-weight: bold; }
+        .log-text { color: #d4d4d4; }
+        .log-error { color: #F44336; }
+    </style>
+</head>
+<body>
+    <h2>
+        <span>HatAI Sync Server</span>
+        <span id="status" class="status-dot"></span>
+    </h2>
+    <div id="log-container">
+        <div class="log-entry log-system">Waiting for WebSocket connection...</div>
+    </div>
+    <script src="popup.js"></script>
+</body>
+</html>

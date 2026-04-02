@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c \"import ast, sys; [ast.parse\\(open\\(f\\).read\\(\\)\\) or print\\(f''OK: {f}''\\) for f in [''core/agent_executor.py'', ''core/agent_tools.py'', ''core/llm_engine.py'']]\")",
+      "Bash(python3 -m py_compile core/agent_executor.py)",
+      "Bash(python3 -m py_compile core/agent_tools.py)",
+      "Bash(python3 -m py_compile core/llm_engine.py)",
+      "Bash(python3:*)",
+      "Bash(grep -r \"ask.*question\\\\|query.*ai\\\\|send.*message\\\\|api.*key\" /Users/nguyenhat/Public/hatai-remote/backend --include=*.py)",
+      "Bash(python -c \"import core.agent_tools\")",
+      "Bash(python -c \"import core.agent_executor\")",
+      "Bash(python -c \":*)",
+      "Bash(python -c \"from core.agent_executor import run_agent; print\\(''OK''\\)\")",
+      "Bash(python -c \"from api.routes.agent import router; print\\(''OK''\\)\")",
+      "Bash(npm run:*)",
+      "Bash(python -c \"from api.routes.agent import router, agent_stop; print\\(''OK''\\)\")",
+      "Bash(python -c \"from core.agent_tools import tool_screenshot; print\\(''OK''\\)\")",
+      "Bash(curl -s --max-time 5 \"http://100.69.50.64:8080/v1/models\")",
+      "Bash(pip install:*)",
+      "Bash(pip show:*)",
+      "Bash(/Users/nguyenhat/miniconda3/bin/python -c \":*)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(find /Volumes/HatAI/Savecode/AI/Model/ -name *.gguf)",
+      "Read(//Users/nguyenhat/**)",
+      "Bash(/Users/nguyenhat/miniconda3/bin/pip install:*)",
+      "Bash(kill 22529 95036)",
+      "Bash(kill 22472 56896 93951)",
+      "Bash(xargs kill:*)",
+      "Bash(find /Users/nguyenhat/Public/hatai-remote/backend/api/routes -type f -name *.py)",
+      "Bash(npm install:*)"
+    ]
+  }
+}

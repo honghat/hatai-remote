@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "HatAI Browser Companion",
+  "version": "1.0",
+  "description": "Chrome Extension for HatAI to deeply scan and visually track DOM elements.",
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "action": {
+    "default_title": "HatAI Active",
+    "default_popup": "popup.html"
+  }
+}

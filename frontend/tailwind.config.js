@@ -1,0 +1,94 @@
+/** @type {import('tailwindcss').Config} */
+export default {
+  darkMode: 'class',
+  content: [
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx}",
+  ],
+  theme: {
+    extend: {
+      colors: {
+        primary: {
+          50: '#eef2ff',
+          100: '#e0e7ff',
+          200: '#c7d2fe',
+          300: '#a5b4fc',
+          400: '#818cf8',
+          500: '#6366f1',
+          600: '#4f46e5',
+          700: '#4338ca',
+          800: '#3730a3',
+          900: '#312e81',
+        },
+        accent: {
+          light: '#06b6d4',
+          dark: '#0891b2',
+        },
+        // Light mode text & backgrounds
+        light: {
+          50: '#ffffff',
+          100: '#f9fafb',
+          200: '#f3f4f6',
+          300: '#e5e7eb',
+          400: '#d1d5db',
+          500: '#9ca3af',
+          600: '#6b7280',
+          700: '#374151',
+          800: '#1f2937',
+          900: '#111827',
+        },
+        // Dark mode colors (slate-based)
+        dark: {
+          50: '#f8fafc',
+          100: '#f1f5f9',
+          200: '#e2e8f0',
+          300: '#cbd5e1',
+          400: '#94a3b8',
+          500: '#64748b',
+          600: '#475569',
+          700: '#334155',
+          800: '#1e293b',
+          850: '#172033',
+          900: '#0f172a',
+          950: '#0a0f1e',
+        }
+      },
+      fontFamily: {
+        sans: ['Inter', 'system-ui', 'sans-serif'],
+        mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+      },
+      animation: {
+        'fade-in': 'fadeIn 0.15s ease-out',
+        'slide-up': 'slideUp 0.2s ease-out',
+        'slide-down': 'slideDown 0.2s ease-out',
+        'zoom-in': 'zoomIn 0.15s ease-out',
+        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+        'float': 'float 3s ease-in-out infinite',
+      },
+      keyframes: {
+        fadeIn: {
+          '0%': { opacity: '0' },
+          '100%': { opacity: '1' },
+        },
+        slideUp: {
+          '0%': { transform: 'translate3d(0, 8px, 0)', opacity: '0' },
+          '100%': { transform: 'translate3d(0, 0, 0)', opacity: '1' },
+        },
+        slideDown: {
+          '0%': { transform: 'translate3d(0, -8px, 0)', opacity: '0' },
+          '100%': { transform: 'translate3d(0, 0, 0)', opacity: '1' },
+        },
+        zoomIn: {
+          '0%': { transform: 'scale3d(0.95, 0.95, 1)', opacity: '0' },
+          '100%': { transform: 'scale3d(1, 1, 1)', opacity: '1' },
+        },
+        float: {
+          '0%, 100%': { transform: 'translate3d(0, 0, 0)' },
+          '50%': { transform: 'translate3d(0, -5px, 0)' },
+        }
+      },
+    },
+  },
+  plugins: [],
+}
+
