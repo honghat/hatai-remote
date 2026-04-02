@@ -192,7 +192,7 @@ export default function Project() {
          await codeApi.post('/code/execute', { command: `git add . && git commit -m "${commitMessage}"`, cwd: rootDir })
          setCommitMessage('')
          fetchGitStatus()
-     } catch (err) { alert('Commit Failed') } finally { setGitLoading(false) }
+     } catch (err) { console.error('Commit Failed', err) } finally { setGitLoading(false) }
   }
 
   const handleGitInit = async () => {
@@ -204,7 +204,7 @@ export default function Project() {
             await codeApi.post('/code/execute', { command: `git remote add origin ${githubUrl}`, cwd: rootDir })
         }
         fetchGitStatus()
-    } catch (err) { alert('Init Failed') } finally { setGitLoading(false) }
+    } catch (err) { console.error('Init Failed', err) } finally { setGitLoading(false) }
   }
 
   const handleGitSync = async () => {
@@ -214,8 +214,7 @@ export default function Project() {
         const branch = gitStatus.branch || 'main'
         await codeApi.post('/code/execute', { command: `git push origin ${branch}`, cwd: rootDir })
         fetchGitStatus()
-        alert(`Successfully pushed to origin/${branch}`)
-    } catch (err) { alert('Sync Failed. Ensure remote is correct and you have permission/SSH keys set.') } finally { setGitLoading(false) }
+    } catch (err) { console.error('Sync Failed', err) } finally { setGitLoading(false) }
   }
 
   const handleGitConnectRemote = async () => {
@@ -226,7 +225,7 @@ export default function Project() {
         // Try adding, if fails (exists), try setting
         await codeApi.post('/code/execute', { command: `git remote add origin ${githubUrl} || git remote set-url origin ${githubUrl}`, cwd: rootDir })
         fetchGitStatus()
-    } catch (err) { alert('Failed to update remote') } finally { setGitLoading(false) }
+    } catch (err) { console.error('Failed to update remote', err) } finally { setGitLoading(false) }
   }
 
   const handleLoadSession = async (id) => {
@@ -666,7 +665,7 @@ export default function Project() {
                                                 </div>
                                             ) : (
                                                 <div className="flex flex-col gap-3">
-                                                    <p className="text-[11px] font-mono opacity-80 break-all bg-black/10 dark:bg-white/5 p-4 rounded-2xl border border-white/5 select-all cursor-copy" onClick={() => { navigator.clipboard.writeText(githubUrl); alert('Copied to clipboard'); }} title="Click to copy repo URL">
+                                                    <p className="text-[11px] font-mono opacity-80 break-all bg-black/10 dark:bg-white/5 p-4 rounded-2xl border border-white/5 select-all cursor-copy" onClick={() => { navigator.clipboard.writeText(githubUrl); }} title="Click to copy repo URL">
                                                         {githubUrl}
                                                     </p>
                                                     <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-500/10 border border-green-500/20 text-green-500 text-[9px] font-black uppercase tracking-widest w-fit">
@@ -705,35 +704,38 @@ export default function Project() {
 
                                 <div className="space-y-2">
                                     <p className="text-[9px] font-black uppercase tracking-widest opacity-20 mb-4 px-1">Changes ({gitStatus.files.length})</p>
-                                    {gitStatus.files.map(f => (
-                                        <div key={f.file} onClick={() => handleOpenFile(f.file)} className={`group flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer ${isDark ? 'bg-white/[0.02] border-white/5 hover:bg-white/5' : 'bg-white/40 border-black/[0.02] hover:bg-white shadow-sm'}`}>
-                                            <div className="flex items-center gap-3 truncate">
-                                                <FileCode size={14} className="opacity-30 group-hover:text-primary-500 transition-colors" />
-                                                <span className="text-[12px] font-bold truncate opacity-80 group-hover:opacity-100">{f.file.split('/').pop()}</span>
+                                    <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
+                                        {gitStatus.files.map(f => (
+                                            <div key={f.file} onClick={() => handleOpenFile(f.file)} className={`group flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer ${isDark ? 'bg-white/[0.02] border-white/5 hover:bg-white/5' : 'bg-white/40 border-black/[0.02] hover:bg-white shadow-sm'}`}>
+                                                <div className="flex items-center gap-3 truncate">
+                                                    <FileCode size={14} className="opacity-30 group-hover:text-primary-500 transition-colors" />
+                                                    <span className="text-[12px] font-bold truncate opacity-80 group-hover:opacity-100">{f.file.split('/').pop()}</span>
+                                                </div>
+                                                <div className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-black ${f.status === 'M' ? 'text-yellow-500 bg-yellow-500/10' : (f.status === 'A' || f.status === '??' ? 'text-green-500 bg-green-500/10' : 'text-red-500 bg-red-500/10')}`}>{f.status === '??' ? 'U' : f.status}</div>
                                             </div>
-                                            <div className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-black ${f.status === 'M' ? 'text-yellow-500 bg-yellow-500/10' : (f.status === 'A' || f.status === '??' ? 'text-green-500 bg-green-500/10' : 'text-red-500 bg-red-500/10')}`}>{f.status === '??' ? 'U' : f.status}</div>
-                                        </div>
-                                    ))}
-                                <div className="mt-8 space-y-4">
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="mt-8 pt-6 border-t border-white/5 space-y-4">
                                     <div className="flex items-center justify-between px-1">
                                         <p className="text-[10px] font-black uppercase tracking-widest opacity-30">Git Cheat Sheet</p>
-                                        <button onClick={() => setShowCheatSheet(!showCheatSheet)} className="text-[10px] font-bold text-primary-500 hover:underline">{showCheatSheet ? 'Hide' : 'Show'}</button>
+                                        <button onClick={() => setShowCheatSheet(!showCheatSheet)} className={`text-[10px] font-black uppercase tracking-widest hover:text-primary-500 transition-all ${showCheatSheet ? 'text-primary-500' : 'opacity-40 hover:opacity-100'}`}>{showCheatSheet ? 'Hide' : 'Show'}</button>
                                     </div>
                                     
                                     {showCheatSheet && (
-                                        <div className="grid grid-cols-1 gap-2 animate-in fade-in slide-in-from-top-2">
+                                        <div className="grid grid-cols-1 gap-2 animate-in fade-in slide-in-from-top-2 duration-500">
                                             {[
-                                                { cmd: 'git pull origin main', desc: 'Lấy code mới nhất' },
-                                                { cmd: 'git push origin main', desc: 'Đẩy code lên mây' },
                                                 { cmd: 'git status', desc: 'Kiểm tra thay đổi' },
+                                                { cmd: 'git pull origin main', desc: 'Cập nhật từ GitHub' },
+                                                { cmd: 'git push origin main', desc: 'Đẩy lên GitHub' },
                                                 { cmd: 'git log --oneline', desc: 'Lịch sử rút gọn' },
-                                                { cmd: 'git checkout -b feature', desc: 'Tạo nhánh mới' },
-                                                { cmd: 'git reset --hard HEAD', desc: 'Hủy mọi thay đổi' },
-                                                { cmd: 'git commit --amend', desc: 'Sửa message commit' }
+                                                { cmd: 'git checkout -b dev', desc: 'Tạo nhánh nháp' },
+                                                { cmd: 'git reset --hard HEAD', desc: 'Về lại lúc nãy' }
                                             ].map(item => (
-                                                <div key={item.cmd} onClick={() => { navigator.clipboard.writeText(item.cmd); alert('Copied: ' + item.cmd); }} className={`flex flex-col p-3 rounded-2xl border cursor-pointer transition-all ${isDark ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-white border-black/5 hover:shadow-md'}`}>
+                                                <div key={item.cmd} onClick={() => { navigator.clipboard.writeText(item.cmd); }} className={`flex flex-col p-3 rounded-2xl border cursor-pointer transition-all ${isDark ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-white border-black/5 hover:shadow-md'}`}>
                                                     <code className="text-[11px] font-bold text-primary-500">{item.cmd}</code>
-                                                    <span className="text-[9px] opacity-40 mt-1">{item.desc}</span>
+                                                    <span className="text-[9px] opacity-40 mt-1 uppercase tracking-widest">{item.desc}</span>
                                                 </div>
                                             ))}
                                         </div>
