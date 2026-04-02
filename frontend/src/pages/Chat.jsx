@@ -677,31 +677,43 @@ function AgentMessage({ events, isStreaming }) {
         />
       )}
 
-      {otherItems.map((item, i) => {
-        switch (item.type) {
-          case 'tool_call': {
-            const resultEv = events.find((e, j) => e.type === 'tool_result' && e.tool === item.tool)
-            return <ToolStep key={i} step={{ tool: item.tool, args: item.args, result: resultEv?.result }} />
+      {(() => {
+        // Track how many times each tool has been called so far (for correct result pairing)
+        const toolCallCounters = {}
+        return otherItems.map((item, i) => {
+          switch (item.type) {
+            case 'tool_call': {
+              // Count which occurrence of this tool this call is
+              const callIdx = toolCallCounters[item.tool] ?? 0
+              toolCallCounters[item.tool] = callIdx + 1
+              // Find the Nth matching tool_result (in events order)
+              let matchCount = 0
+              const resultEv = events.find(e => {
+                if (e.type !== 'tool_result' || e.tool !== item.tool) return false
+                return matchCount++ === callIdx
+              })
+              return <ToolStep key={i} step={{ tool: item.tool, args: item.args, result: resultEv?.result }} />
+            }
+            case 'screenshot':
+              return <ScreenshotBlock key={i} url={item.url} base64={item.base64} path={item.path} />
+            case 'answer':
+              return (
+                <div key={i} className="chat-bubble-ai max-w-none text-light-900 dark:text-white leading-relaxed font-medium">
+                  <ChatMarkdown content={item.content} />
+                </div>
+              )
+            case 'error':
+              return (
+                <div key={i} className="flex items-center gap-3 bg-red-500/10 border border-red-500/20 rounded-2xl px-4 py-3 text-red-400 text-sm font-bold">
+                  <AlertCircle size={16} className="text-red-500 flex-shrink-0" />
+                  <p>{item.content}</p>
+                </div>
+              )
+            default:
+              return null
           }
-          case 'screenshot':
-            return <ScreenshotBlock key={i} url={item.url} base64={item.base64} path={item.path} />
-          case 'answer':
-            return (
-              <div key={i} className="chat-bubble-ai max-w-none text-light-900 dark:text-white leading-relaxed font-medium">
-                <ChatMarkdown content={item.content} />
-              </div>
-            )
-          case 'error':
-            return (
-              <div key={i} className="flex items-center gap-3 bg-red-500/10 border border-red-500/20 rounded-2xl px-4 py-3 text-red-400 text-sm font-bold">
-                <AlertCircle size={16} className="text-red-500 flex-shrink-0" />
-                <p>{item.content}</p>
-              </div>
-            )
-          default:
-            return null
-        }
-      })}
+        })
+      })()}
       {isStreaming && events.length === 0 && (
         <div className="flex items-center gap-2 px-4 py-2 border border-light-200 dark:border-slate-800 rounded-full bg-light-50 dark:bg-dark-900/40 w-fit animate-pulse">
           <div className="w-1.5 h-1.5 rounded-full bg-primary-500" />

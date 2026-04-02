@@ -96,8 +96,17 @@ console.log("🚀 HatAI Extension Loaded. Listeners active.");
 let hataiHudHost = null;
 let hataiLogContainer = null;
 let currentThinkSpanNode = null;
-let isManualHidden = false;
 let isMinimized = false;
+let autoHideTimer = null;
+
+function hideHUD() {
+    if (!hataiHudHost) return;
+    const wrapper = hataiHudHost.shadowRoot.getElementById('hatai-hud-wrapper');
+    const fab = hataiHudHost.shadowRoot.getElementById('hatai-fab');
+    isManualHidden = true;
+    wrapper.classList.add('hatai-hidden');
+    fab.style.display = 'flex';
+}
 
 function ensureFloatingPopup() {
     if (document.getElementById('hatai-hud-host')) {
@@ -429,12 +438,34 @@ function handleAIPayload(payload) {
         } else if (t === "done") {
             currentThinkSpanNode = null;
             appendLogEntry("🏁 TÁC VỤ HOÀN TẤT TRÊN LƯỢT NÀY", "log-done");
+            
+            // Tự động ẩn HUD sau 5 giây nếu tác vụ kết thúc
+            if (autoHideTimer) clearTimeout(autoHideTimer);
+            autoHideTimer = setTimeout(() => {
+                if (!isManualHidden) hideHUD();
+            }, 5000);
         }
     } catch (e) { console.error(e); }
 }
 
 chrome.runtime.onMessage.addListener((payload, sender, sendResponse) => {
     if (window.location.href.includes("localhost:5173/chat")) return;
+    
+    // Xử lý các lệnh điều khiển từ popup/background
+    if (payload.action === 'toggleAllElements') {
+        const badges = document.querySelectorAll('.hatai-v-badge, .hatai-bbox');
+        badges.forEach(b => b.style.display = payload.show ? 'block' : 'none');
+        if (!payload.show) hideHUD();
+        sendResponse({ success: true });
+        return true;
+    }
+    
+    if (payload.action === 'getElements') {
+        const badges = document.querySelectorAll('.hatai-v-badge');
+        sendResponse({ elements: Array.from(badges).map(b => b.innerText) });
+        return true;
+    }
+
     handleAIPayload(payload);
 });
 

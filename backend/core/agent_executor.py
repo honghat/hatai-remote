@@ -161,7 +161,9 @@ def build_system_prompt(user_query: str = "", session_id: int = None) -> str:
 - If you are building a new feature, ensure files are placed in their correct semantic directories (e.g., `backend/core/`, `frontend/src/components/`).
 """
 
-    return f"""You are HatAI Agent — an advanced AI assistant running on macOS. Current time: {now_str}.
+    return f"""You are HatAI Agent — an advanced AI assistant running on macOS. 
+Current time: {now_str}. 
+IMPORTANT: Today is {now_str.split(' ')[0]}. If the user asks for "hôm nay", "mới nhất", "tin tức", or any time-sensitive info, you MUST include the current date or "today" in your search query to get real-time results.
 {project_context}
 
 # How to think
@@ -196,6 +198,9 @@ def build_system_prompt(user_query: str = "", session_id: int = None) -> str:
 
 # Search & Research
 - Use `deep_search` for ANY web research. It searches Google, crawls pages, and returns full content.
+- For "today's news" or "tin tức hôm nay": 
+  1. Use `deep_search` with the current date (e.g., `deep_search(query="tin tức vnexpress {now_str.split(' ')[0]}")`).
+  2. OR use `site_search` with `site="google"` and a time-bound query.
 - After receiving search results: READ the full `combined_content` carefully. Extract EXACT data (numbers, prices, names) — do NOT paraphrase numbers or make up statistics.
 - When presenting search results, structure your answer with:
   - Key facts/data (exact numbers from sources)
@@ -323,10 +328,18 @@ def _parse_tool_calls(content: str) -> List[tuple]:
     calls = []
 
     def _extract_args(data):
-        """Extract args from tool call dict — handles both {"tool":"x","args":{...}} and {"tool":"x","key":"val",...}"""
-        if "args" in data and isinstance(data["args"], dict):
-            return data["args"]
-        # Flat format: everything except "tool" key is an arg
+        """Extract args from tool call dict — handles both {"tool":"x","args":{...}}, {"tool":"x","arguments":{...}}, and {"tool":"x","key":"val",...}"""
+        # 1. Standard "args" or "arguments" key
+        a = data.get("args") or data.get("arguments")
+        if a is not None and isinstance(a, dict):
+            return a
+            
+        # 2. If 'args' is a string (hallucination), try to parse it
+        if isinstance(a, str):
+            try: return json.loads(a)
+            except: return {"query": a} # Fallback for search-like tools
+            
+        # 3. Flat format: everything except "tool" key is an arg
         return {k: v for k, v in data.items() if k != "tool"}
 
     # Strategy 1: Extract from code blocks (```tool, ```json, ```)
@@ -869,12 +882,29 @@ Rules:
     ]
 
     full_plan = ""
+    yielded_think_len = 0
+    yielded_text_len = 0
+
     for chunk in engine.chat_stream(messages=plan_messages, max_tokens=max_tokens, temperature=temperature):
         full_plan += chunk
-        yield chunk, None
+        
+        # Extract thinking vs text deltas (same logic as main run_agent)
+        think_matches = re.findall(r'<(?:think|thought)>([\s\S]*?)(?:</(?:think|thought)>|$)', full_plan, re.IGNORECASE)
+        current_thinking = "".join(think_matches)
+        
+        if len(current_thinking) > yielded_think_len:
+            delta = current_thinking[yielded_think_len:]
+            yield delta, None
+            yielded_think_len = len(current_thinking)
+        
+        # We don't yield the plan text tokens here as 'text' type yet 
+        # because the original run_agent logic expects plan_text to be returned in full at the end.
+        # But we must ensure the 'final' plan returned is CLEAN.
 
     # Final cleanup
-    clean_plan = re.sub(r'<think>.*?</think>', '', full_plan, flags=re.DOTALL).strip()
+    # Remove thoughts for the actual plan parsing
+    clean_plan = re.sub(r'<(?:think|thought)>.*?</(?:think|thought)>', '', full_plan, flags=re.DOTALL | re.IGNORECASE).strip()
+    
     if "SIMPLE" in clean_plan.upper() or clean_plan.count("\n") < 1:
         yield "", ""
     else:
@@ -1380,8 +1410,8 @@ def stringify_agent_event(event: Dict[str, Any]) -> str:
         return f"\n<think>\n{content}\n</think>\n"
     elif etype == "thinking_token":
         content = event.get("content", "")
-        # Avoid leaking raw thinking tags if they are already being streamed individually
-        return content.replace("<think>", "").replace("</think>", "").replace("<thought>", "").replace("</thought>", "")
+        # Use regex for robust, case-insensitive tag removal
+        return re.sub(r'<\/?(?:think|thought)>', '', content, flags=re.IGNORECASE)
     elif etype == "tool_call":
         tool = event.get("tool", "unknown")
         # Ensure arguments are treated as a dict

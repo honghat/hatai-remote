@@ -5,7 +5,8 @@
   "description": "Chrome Extension for HatAI to deeply scan and visually track DOM elements.",
   "permissions": [
     "activeTab",
-    "scripting"
+    "scripting",
+    "action"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -22,6 +23,7 @@
   ],
   "action": {
     "default_title": "HatAI Active",
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {}
   }
 }

@@ -66,5 +66,28 @@ function connect() {
     };
 }
 
+// Tự động ẩn icon extension khỏi toolbar khi popup mở
+chrome.runtime.sendMessage({ type: "hide_icon" });
+
+// Tự động đóng popup sau 2 giây để không làm phiền trải nghiệm người dùng
+setTimeout(() => {
+    window.close();
+}, 2000);
+
+// Tự động hiện popup sau 500ms rồi đóng sau 3 giây
+setTimeout(() => {
+    document.body.style.display = 'block'; // Hiện popup
+}, 500);
+
+setTimeout(() => {
+    window.close(); // Tự động đóng popup
+}, 3500);
+
+// Khi popup đóng, icon đã được ẩn (do hide_icon message ở trên)
+window.onbeforeunload = () => {
+    // Icon đã được ẩn khi popup mở, không cần hiện lại
+};
+
 // Khởi chạy
 connect();
+

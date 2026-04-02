@@ -87,6 +87,19 @@ export default function Project() {
   const chatScrollRef = useRef(null)
   const socketRef = useRef(null)
   const [daemonState, setDaemonState] = useState('idle')
+  
+  // High-performance message batching
+  const chatMessagesRef = useRef(chatMessages)
+  useEffect(() => { chatMessagesRef.current = chatMessages }, [chatMessages])
+  
+  const [lastUpdate, setLastUpdate] = useState(0)
+  const batchTimerRef = useRef(null)
+  
+  // Sync Ref back to State every 150ms during streaming
+  const syncChatState = () => {
+    setChatMessages([...chatMessagesRef.current])
+    setLastUpdate(Date.now())
+  }
 
   const availableModels = [
     { id: 'openai', name: 'OpenAI Server', icon: Server, desc: 'Generic API' },
@@ -101,12 +114,21 @@ export default function Project() {
   useEffect(() => {
     if (activeTab) localStorage.setItem('hatai_active_tab', activeTab)
   }, [activeTab])
+  // Use a ref for active session to use in WS handler without stale closure
+  const activeSessionRef = useRef(activeSessionId)
   useEffect(() => {
-    localStorage.setItem('hatai_project_chat', JSON.stringify(chatMessages))
-  }, [chatMessages])
-  useEffect(() => {
+    activeSessionRef.current = activeSessionId
     if (activeSessionId) localStorage.setItem('hatai_session_id', activeSessionId)
   }, [activeSessionId])
+
+  // Optimize LocalStorage: Debounce saving chat history to prevent performance death during streaming
+  const saveChatTimeoutRef = useRef(null)
+  useEffect(() => {
+    if (saveChatTimeoutRef.current) clearTimeout(saveChatTimeoutRef.current)
+    saveChatTimeoutRef.current = setTimeout(() => {
+      localStorage.setItem('hatai_project_chat', JSON.stringify(chatMessages))
+    }, 2000)
+  }, [chatMessages])
 
   useEffect(() => {
     fetchFiles()
@@ -131,17 +153,16 @@ export default function Project() {
         ws.onmessage = (event) => {
             const rawData = JSON.parse(event.data)
             
-            // 1. Handle Global Status
+            // 1. Handle Global Status (Directly update small states)
             if (rawData.type === 'daemon_status' || rawData.type === 'heartbeat') {
                 setDaemonState(rawData.state)
-                
-                // Check if our active session is running in the background
-                const isActiveRunning = (rawData.active_sessions || []).includes(Number(activeSessionId))
-                if (isActiveRunning || (rawData.state === 'running' && rawData.session_id == activeSessionId)) {
+                const currentSession = activeSessionRef.current
+                const isActiveRunning = (rawData.active_sessions || []).includes(Number(currentSession))
+                if (isActiveRunning || (rawData.state === 'running' && rawData.session_id == currentSession)) {
                     setAgentStatus(rawData.message || '⚙️ Agent is working in background...')
                     setIsChatStreaming(true)
                 } else if (rawData.state === 'idle' || rawData.state === 'done') {
-                    if (rawData.session_id == activeSessionId || !rawData.session_id) {
+                    if (rawData.session_id == currentSession || !rawData.session_id) {
                         setAgentStatus(null)
                         setIsChatStreaming(false)
                     }
@@ -149,94 +170,93 @@ export default function Project() {
                 return
             }
 
-            // 2. Unpack task_log if present
+            // 2. Unpack task_log/raw event
             const isTaskLog = rawData.type === 'task_log'
             const data = isTaskLog ? { ...rawData.log, session_id: rawData.session_id } : rawData
 
-            // 3. Handle Session-Specific Events
-            if (data.session_id && data.session_id == activeSessionId) {
-                setChatMessages(prev => {
-                    const next = [...prev]
-                    const lastIdx = next.length - 1
-                    let lastMsg = lastIdx >= 0 ? { ...next[lastIdx] } : null
-                    
-                    // If last message is not from assistant, create one
-                    if (!lastMsg || lastMsg.role !== 'assistant') {
-                        lastMsg = { role: 'assistant', content: '', thoughts: '', tool_calls: [], screenshots: [], processedIndices: new Set() }
-                        next.push(lastMsg)
-                    } else {
-                        lastMsg = { ...lastMsg } // Clone for immutability
-                        lastMsg.tool_calls = [...(lastMsg.tool_calls || [])]
-                        lastMsg.screenshots = [...(lastMsg.screenshots || [])]
-                        lastMsg.processedIndices = lastMsg.processedIndices || new Set()
-                        next[next.length - 1] = lastMsg
-                    }
+            // 3. Handle Session-Specific Events via REF for performance
+            const currentSessionId = activeSessionRef.current
+            if (data.session_id && data.session_id == currentSessionId) {
+                const messages = chatMessagesRef.current
+                const lastIdx = messages.length - 1
+                let lastMsg = lastIdx >= 0 ? messages[lastIdx] : null
+                
+                if (!lastMsg || lastMsg.role !== 'assistant') {
+                    lastMsg = { role: 'assistant', content: '', thoughts: '', tool_calls: [], screenshots: [], processedIndices: new Set() }
+                    messages.push(lastMsg)
+                }
 
-                    // Deduplicate via Task Log Index if available
-                    if (isTaskLog && data.index !== undefined) {
-                        if (lastMsg.processedIndices.has(data.index)) return prev
-                        lastMsg.processedIndices.add(data.index)
-                    }
+                // Deduplicate
+                if (isTaskLog && data.index !== undefined) {
+                    if (lastMsg.processedIndices.has(data.index)) return
+                    lastMsg.processedIndices.add(data.index)
+                }
 
-                    if (data.type === 'thinking_token' || data.type === 'thinking') {
-                        const newThought = data.content || ''
-                        if (newThought && !lastMsg.thoughts.endsWith(newThought)) {
-                            lastMsg.thoughts = (lastMsg.thoughts || '') + newThought
-                        }
-                    } else if (data.type === 'text') {
-                        const newContent = data.content || ''
-                        if (newContent) {
-                            // Smarter deduplication: don't append if the last few chars match exactly
-                            const current = lastMsg.content || ''
-                            if (!current.endsWith(newContent)) {
-                                lastMsg.content = current + newContent
+                let changed = false
+                if (data.type === 'thinking_token' || data.type === 'thinking') {
+                    const newThought = data.content || ''
+                    if (newThought && !lastMsg.thoughts.endsWith(newThought)) {
+                        lastMsg.thoughts = (lastMsg.thoughts || '') + newThought
+                        changed = true
+                    }
+                } else if (data.type === 'text') {
+                    const newContent = data.content || ''
+                    if (newContent && !lastMsg.content.endsWith(newContent)) {
+                        lastMsg.content += newContent
+                        changed = true
+
+                        // Throttled Live stream to editor
+                        if (activeTab && lastMsg.content.includes('```')) {
+                            const codeLines = lastMsg.content.split('\n')
+                            const blockStart = codeLines.lastIndexOf(codeLines.find(l => l.startsWith('```')))
+                            if (blockStart !== -1) {
+                                const currentBlock = codeLines.slice(blockStart + 1).join('\n')
+                                if (!currentBlock.includes('```')) {
+                                    setProposingContents(draft => ({ ...draft, [activeTab]: currentBlock }))
+                                }
                             }
                         }
-                        
-                        // Live stream to editor
-                        if (activeTab && lastMsg.content.includes('```')) {
-                           const codeLines = lastMsg.content.split('\n')
-                           const blockStart = codeLines.lastIndexOf(codeLines.find(l => l.startsWith('```')))
-                           if (blockStart !== -1) {
-                               const currentBlock = codeLines.slice(blockStart + 1).join('\n')
-                               if (!currentBlock.includes('```')) {
-                                   setProposingContents(draft => ({ ...draft, [activeTab]: currentBlock }))
-                               }
-                           }
-                        }
-                    } else if (data.type === 'tool_call') {
-                        // Avoid duplicate tool calls (common in task log loops)
-                        const isDup = lastMsg.tool_calls.some(tc => tc.tool === data.tool && JSON.stringify(tc.args) === JSON.stringify(data.args) && !tc.result)
-                        if (!isDup) {
-                            lastMsg.tool_calls.push({ tool: data.tool, args: data.args, result: null })
-                        }
-                        setAgentStatus(`⚙️ Đang chạy: ${data.tool}...`)
-                    } else if (data.type === 'tool_result') {
-                        const tcIdx = [...lastMsg.tool_calls].reverse().findIndex(t => t.tool.includes(data.tool) && !t.result)
-                        if (tcIdx !== -1) {
-                            const actualIdx = lastMsg.tool_calls.length - 1 - tcIdx
-                            lastMsg.tool_calls[actualIdx] = { ...lastMsg.tool_calls[actualIdx], result: data.result }
-                        }
-                        setAgentStatus(`✅ Hoàn thiện: ${data.tool}`)
-                    } else if (data.type === 'screenshot' || data.type === 'tool_result_screenshot') {
-                        const url = data.url || data.content || (data.base64 ? `data:image/png;base64,${data.base64}` : null)
-                        if (url && !lastMsg.screenshots.includes(url)) lastMsg.screenshots.push(url)
-                    } else if (data.type === 'done' || data.type === 'task_result') {
-                        setAgentStatus(null)
-                        setIsChatStreaming(false)
-                        if (data.result && data.result.length > lastMsg.content.length) {
-                             lastMsg.content = data.result
-                        }
-                    } else if (data.type === 'error') {
-                        if (!lastMsg.content.includes(data.content)) {
-                            lastMsg.content += `\n\n❌ **Error**: ${data.content}`
-                        }
-                        setAgentStatus(null)
-                        setIsChatStreaming(false)
                     }
+                } else if (data.type === 'tool_call') {
+                    lastMsg.tool_calls.push({ tool: data.tool, args: data.args, result: null })
+                    setAgentStatus(`⚙️ Running: ${data.tool}...`)
+                    changed = true
+                } else if (data.type === 'tool_result') {
+                    const tcIdx = [...lastMsg.tool_calls].reverse().findIndex(t => t.tool.includes(data.tool) && !t.result)
+                    if (tcIdx !== -1) {
+                        const actualIdx = lastMsg.tool_calls.length - 1 - tcIdx
+                        lastMsg.tool_calls[actualIdx] = { ...lastMsg.tool_calls[actualIdx], result: data.result }
+                    }
+                    setAgentStatus(`✅ Done: ${data.tool}`)
+                    changed = true
+                } else if (data.type === 'screenshot' || data.type === 'tool_result_screenshot') {
+                    const url = data.url || data.content || (data.base64 ? `data:image/png;base64,${data.base64}` : null)
+                    if (url && !lastMsg.screenshots.includes(url)) lastMsg.screenshots.push(url)
+                    changed = true
+                } else if (data.type === 'done' || data.type === 'task_result') {
+                    setAgentStatus(null)
+                    setIsChatStreaming(false)
+                    
+                    // Only update content if we have a better result and the current content is significantly shorter
+                    // OR if the current content is empty. This prevents the "Digest" duplication.
+                    if (data.result && (!lastMsg.content || (data.result.length > lastMsg.content.length + 50 && !lastMsg.content.includes(data.result.substring(0, 50))))) {
+                        // If the result looks like a "Digest" (contains tool markers), but we already have content, don't overwrite
+                        const isDigest = data.result.includes('🔧') || data.result.includes('📤')
+                        if (!isDigest || !lastMsg.content) {
+                            lastMsg.content = data.result
+                            changed = true
+                        }
+                    }
+                    syncChatState() // Forces final sync
+                }
 
-                    return next
-                })
+                // Batch the state update or use requestAnimationFrame
+                if (changed && !batchTimerRef.current) {
+                    batchTimerRef.current = setTimeout(() => {
+                        batchTimerRef.current = null
+                        syncChatState()
+                    }, 150)
+                }
             }
         }
 
@@ -254,9 +274,12 @@ export default function Project() {
     connectAgentWS()
 
     const timer = setInterval(() => { 
-        fetchLogs()
-        fetchGitStatus()
-    }, 10000)
+        // Only trigger heavy background polling if page is visible and agent is not too busy
+        if (!document.hidden) {
+            fetchLogs()
+            fetchGitStatus()
+        }
+    }, 20000) // Increase interval to 20s to reduce load
     return () => {
         clearInterval(timer)
         if (socketRef.current) socketRef.current.close()
@@ -269,7 +292,13 @@ export default function Project() {
       const resp = await codeApi.get('/code/scan')
       setFiles(resp.data.files || [])
       setError(null)
-    } catch (err) { setError('Connection Error'); } finally { setLoading(false); }
+    } catch (err) {
+      // Don't block the page — show a warning but let the user in
+      setError('Code server không phản hồi. Hãy thử lại sau.')
+    } finally {
+      // ALWAYS exit loading so page renders even if agent is busy
+      setLoading(false)
+    }
   }
 
   const timeAgo = (date) => {
@@ -290,36 +319,44 @@ export default function Project() {
   const fetchGitStatus = async () => {
     setGitLoading(true)
     try {
-        const rootDir = "/Users/nguyenhat/Public/hatai-remote" // Corrected root for HatAI Remote repo
+        const rootDir = "/Users/nguyenhat/Public/hatai-remote"
         
-        // Check if git is initialized
-        const checkInit = await codeApi.post('/code/execute', { command: '[ -d .git ] && echo "YES" || echo "NO"', cwd: rootDir })
-        const initialised = checkInit.data.stdout.trim() === 'YES'
+        // Check if git is initialized — non-blocking, short timeout
+        let initialised = false
+        try {
+            const checkInit = await codeApi.post('/code/execute', { command: '[ -d .git ] && echo "YES" || echo "NO"', cwd: rootDir })
+            initialised = checkInit.data.stdout.trim() === 'YES'
+        } catch { }
         setIsGitInit(initialised)
         
-        if (!initialised) {
-            setGitLoading(false)
-            return
+        if (!initialised) return
+
+        // Fire all git commands independently — don't let one failure block others
+        const safeExec = async (cmd) => {
+            try {
+                const r = await codeApi.post('/code/execute', { command: cmd, cwd: rootDir })
+                return r.data.stdout.trim()
+            } catch { return '' }
         }
 
-        const [branchResp, statusResp, nameResp, emailResp, remoteResp] = await Promise.all([
-            codeApi.post('/code/execute', { command: 'git branch --show-current', cwd: rootDir }),
-            codeApi.post('/code/execute', { command: 'git status --porcelain', cwd: rootDir }),
-            codeApi.post('/code/execute', { command: 'git config user.name', cwd: rootDir }),
-            codeApi.post('/code/execute', { command: 'git config user.email', cwd: rootDir }),
-            codeApi.post('/code/execute', { command: 'git remote get-url origin || echo ""', cwd: rootDir })
+        const [branch, statusOut, name, email, remote] = await Promise.all([
+            safeExec('git branch --show-current'),
+            safeExec('git status --porcelain'),
+            safeExec('git config user.name'),
+            safeExec('git config user.email'),
+            safeExec('git remote get-url origin || echo ""'),
         ])
         
-        const branch = branchResp.data.stdout.trim()
-        const files = statusResp.data.stdout.split('\n').filter(l => l.trim()).map(line => {
-            const status = line.substring(0, 2).trim()
-            const file = line.substring(3)
-            return { file, status }
-        })
-        setGitStatus({ branch, files })
-        setGitProfile({ name: nameResp.data.stdout.trim(), email: emailResp.data.stdout.trim() })
-        setGithubUrl(remoteResp.data.stdout.trim())
-    } catch (err) {} finally { setGitLoading(false) }
+        const changedFiles = statusOut.split('\n').filter(l => l.trim()).map(line => ({
+            file: line.substring(3),
+            status: line.substring(0, 2).trim()
+        }))
+        setGitStatus({ branch, files: changedFiles })
+        setGitProfile({ name, email })
+        setGithubUrl(remote)
+    } catch (err) {
+        // Non-fatal — git section just shows empty data
+    } finally { setGitLoading(false) }
   }
 
   const GIT_PRESETS = [
@@ -406,25 +443,12 @@ export default function Project() {
     setShowChat(true)
   }
 
-  const [systemLogs, setSystemLogs] = useState([])
   const fetchLogs = async () => {
     try {
-        const [logResp, msgResp] = await Promise.all([
-          api.get('/ai/logs'),
-          api.get('/ai/sessions') // Get latest thoughts from database
-        ])
+        const logResp = await api.get('/ai/logs')
         const recentLogs = logResp.data.logs || []
-        
-        // Find most recent session with thoughts
-        const latestSession = msgResp.data[0]
-        let recentThoughts = []
-        if (latestSession) {
-            const msgs = await api.get(`/ai/sessions/${latestSession.id}/messages`)
-            recentThoughts = msgs.data.filter(m => m.role === 'assistant' && m.thoughts).slice(-3).map(m => `[THOUGHT] ${m.thoughts.replace(/<\/?think>/gi,'').substring(0, 150)}...`)
-        }
-        
-        setSystemLogs([...recentThoughts, ...recentLogs.slice(-20)])
-    } catch (err) { console.error('Log sync failed') }
+        setSystemLogs(recentLogs.slice(-20))
+    } catch (err) { /* silent fail — don't block anything */ }
   }
 
   const handleOpenFile = async (path) => {
@@ -486,6 +510,7 @@ export default function Project() {
   }
 
   const [agentStatus, setAgentStatus] = useState(null)
+  const [systemLogs, setSystemLogs] = useState([])
 
   async function handleSendChat() {
     if (!chatInput.trim() || isChatStreaming) return
@@ -576,7 +601,34 @@ export default function Project() {
   const filteredFiles = files.filter(f => f.path.toLowerCase().includes(searchTerm.toLowerCase()))
   const contentResults = contentSearch.length > 2 ? files.filter(f => f.content?.toLowerCase().includes(contentSearch.toLowerCase())) : []
   const fileTree = buildFileTree(filteredFiles)
-  const mentionFiles = files.filter(f => f.name.toLowerCase().includes(mentionQuery.toLowerCase())).slice(0, 8)
+  const allFolders = Array.from(new Set(files.flatMap(f => {
+    const parts = f.path.split('/')
+    return parts.slice(0, -1).map((_, i) => ({
+        name: parts[i],
+        path: parts.slice(0, i+1).join('/'),
+        type: 'folder'
+    }))
+  }))).filter((v, i, a) => a.findIndex(t => t.path === v.path) === i)
+
+  const WORKFLOWS = [
+    { id: 'review', name: 'Review Project', icon: Search, desc: 'Phân tích toàn bộ codebase và tìm lỗi' },
+    { id: 'doc', name: 'Generate Docs', icon: FileCode, desc: 'Viết tài liệu README và API chuẩn' },
+    { id: 'fix', name: 'Repair UI/UX', icon: Zap, desc: 'Sửa lỗi giao diện và trải nghiệm người dùng' },
+    { id: 'git', name: 'Git Sync', icon: GitBranch, desc: 'Commit và Push toàn bộ thay đổi' },
+    { id: 'brain', name: 'Self Improve', icon: Brain, desc: 'Tối ưu hóa code của chính mình' },
+    { id: 'test', name: 'Auto Test', icon: Activity, desc: 'Viết và chạy unit tests' }
+  ]
+
+  const mentionFiles = [
+    ...allFolders.map(f => ({ ...f, type: 'folder' })),
+    ...files.map(f => ({ ...f, type: 'file' }))
+  ].filter(f => f.name.toLowerCase().includes(mentionQuery.toLowerCase())).slice(0, 12)
+
+  const slashQuery = chatInput.lastIndexOf('/') !== -1 && (chatInput.lastIndexOf('/') === 0 || chatInput[chatInput.lastIndexOf('/')-1] === ' ' || chatInput[chatInput.lastIndexOf('/')-1] === '\n') 
+    ? chatInput.substring(chatInput.lastIndexOf('/') + 1).split(' ')[0] 
+    : null
+  
+  const filteredWorkflows = slashQuery !== null ? WORKFLOWS.filter(w => w.id.toLowerCase().includes(slashQuery.toLowerCase()) || w.name.toLowerCase().includes(slashQuery.toLowerCase())) : []
 
   const renderTree = (node, depth = 0) => {
     const sorted = Object.values(node.children).sort((a,b) => (a.type !== b.type ? (a.type === 'folder' ? -1 : 1) : a.name.localeCompare(b.name)))
@@ -841,10 +893,20 @@ export default function Project() {
 
         <div className={`flex-1 flex flex-col relative overflow-hidden transition-colors duration-300 ${isDark ? 'bg-[#0a0a0c]' : 'bg-white'}`}>
             <div className={`flex items-center border-b transition-colors duration-300 ${isDark ? 'bg-[#0f0f12] border-white/5' : 'bg-[#f0ede1] border-black/[0.05]'}`}>
-                <div className="flex-1 flex overflow-x-auto custom-scrollbar-h min-h-[44px]">
+                <div className="flex-1 flex overflow-x-auto custom-scrollbar-h min-h-[48px] px-2">
                     {openTabs.map(path => (
-                        <div key={path} onClick={() => setActiveTab(path)} className={`px-5 py-3 border-r cursor-pointer text-[11px] font-bold whitespace-nowrap transition-all group flex items-center gap-3 ${isDark ? (activeTab === path ? 'bg-[#0a0a0c] text-primary-400 border-b-2 border-primary-500' : 'opacity-40 border-white/5 hover:opacity-100') : (activeTab === path ? 'bg-white text-primary-600' : 'opacity-30 border-black/[0.05] hover:opacity-100')}`}>
-                            {path.split('/').pop()}{pendingChanges[path] && <span className="w-1.5 h-1.5 rounded-full bg-primary-500 animate-pulse" />}<X size={12} className="opacity-0 group-hover:opacity-40 hover:!opacity-100" onClick={(e) => { e.stopPropagation(); setOpenTabs(prev => prev.filter(p => p !== path)); if (activeTab === path) setActiveTab(openTabs.filter(p => p !== path)[0] || null); }} />
+                        <div key={path} onClick={() => setActiveTab(path)} className={`h-full px-6 flex items-center gap-4 cursor-pointer text-[12px] font-black uppercase tracking-widest transition-all relative border-r border-white/5
+                            ${activeTab === path 
+                                ? (isDark ? 'bg-gradient-to-b from-primary-500/10 to-transparent text-primary-400 opacity-100' : 'bg-white text-primary-600 shadow-sm') 
+                                : 'opacity-30 hover:opacity-60 text-slate-400'}`}>
+                            {path.split('/').pop()}
+                            {pendingChanges[path] && <div className="w-2 h-2 rounded-full bg-primary-500 shadow-[0_0_8px_rgba(33,150,243,0.8)]" />}
+                            <X 
+                                size={15} 
+                                className="opacity-0 group-hover:opacity-60 hover:!opacity-100 hover:text-white hover:bg-red-500 rounded-md p-1 transition-all ml-2" 
+                                onClick={(e) => { e.stopPropagation(); setOpenTabs(prev => prev.filter(p => p !== path)); if (activeTab === path) setActiveTab(openTabs.filter(p => p !== path)[0] || null); }} 
+                            />
+                            {activeTab === path && <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary-500" />}
                         </div>
                     ))}
                 </div>
@@ -860,49 +922,65 @@ export default function Project() {
             </div>
             <div className="flex-1 flex flex-col relative overflow-hidden">
                 {activeTab ? (
-                    <div className="flex-1 overflow-auto custom-scrollbar">
-                        <div className="flex min-h-full relative">
-                            {/* AI RECONSTRUCTION OVERLAY - NEW */}
-                            {proposingContents[activeTab] && (
-                                <div className="absolute inset-0 z-10 pointer-events-none overflow-hidden flex">
-                                    <div className="w-[60px]" /> {/* Spacer for line numbers */}
-                                    <div className="flex-1 p-10 pl-4 bg-primary-500/5 backdrop-blur-[1px] animate-pulse-slow">
-                                        <div className="flex items-center gap-2 mb-4 text-[10px] font-black text-primary-500 uppercase tracking-widest opacity-60">
-                                            <Sparkles size={12}/> AI RECONSTRUCTION IN PROGRESS...
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
+                    <div className="flex-1 flex flex-col min-h-0">
+                        {/* BREADCRUMBS - STICKY TOP */}
+                        <div className={`sticky top-0 z-20 px-8 py-3 border-b backdrop-blur-3xl flex items-center gap-3 transition-colors ${isDark ? 'bg-[#0f0f12]/80 border-white/5' : 'bg-white/80 border-black/5'}`}>
+                            <div className="w-2 h-2 rounded-full bg-primary-500 shadow-[0_0_10px_rgba(33,150,243,0.8)] animate-pulse" />
+                            <span className="text-[12px] font-black uppercase tracking-[0.3em] opacity-40 truncate">{activeTab}</span>
+                        </div>
 
-                            {/* LINE NUMBERS */}
-                            <div className={`p-10 pr-4 text-right font-mono text-[14px] select-none opacity-20 border-r ${isDark ? 'border-white/5' : 'border-black/5'}`} style={{ minWidth: '60px', userSelect: 'none', backgroundColor: 'transparent' }}>
-                                {(proposingContents[activeTab] || editingContents[activeTab] || '').split('\n').map((_, i) => (
-                                    <div key={i} style={{ height: '1.8em', lineHeight: '1.8em' }}>{i + 1}</div>
-                                ))}
-                            </div>
-                            
-                            <div className="flex-1 p-10 pl-4">
-                                <Editor 
-                                    value={proposingContents[activeTab] || editingContents[activeTab] || ''} 
-                                    onValueChange={code => { setEditingContents(prev => ({ ...prev, [activeTab]: code })); if (code !== originalContents[activeTab]) setPendingChanges(p => ({ ...p, [activeTab]: true })); }} 
-                                    highlight={code => highlight(code, (activeTab.endsWith('.py') ? languages.python : (activeTab.endsWith('.css') ? languages.css : (activeTab.endsWith('.html') ? languages.markup : languages.javascript))), activeTab.split('.').pop())} 
-                                    padding={0} 
-                                    style={{ fontFamily: '"Fira Code", "Fira Mono", monospace', fontSize: 14, minHeight: '100%', outline: 'none', caretColor: isDark ? '#fff' : '#000', color: isDark ? (proposingContents[activeTab] ? '#00ff99' : '#d4d4d4') : (proposingContents[activeTab] ? '#006644' : '#2d2d2d'), lineHeight: '1.8em', transition: 'color 0.3s ease' }} 
-                                />
-                                {proposingContents[activeTab] && !isChatStreaming && (
-                                    <div className="mt-8 flex gap-4 animate-in fade-in slide-in-from-top-2 duration-500">
-                                        <button onClick={() => { setEditingContents(prev => ({ ...prev, [activeTab]: proposingContents[activeTab] })); setProposingContents(prev => ({ ...prev, [activeTab]: null })); setPendingChanges(prev => ({ ...prev, [activeTab]: true })); }} className="px-6 py-2 bg-primary-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-primary-500 shadow-xl shadow-primary-900/30">Accept Reconstruction</button>
-                                        <button onClick={() => setProposingContents(prev => ({ ...prev, [activeTab]: null }))} className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border border-white/10 hover:bg-white/5`}>Discard</button>
+                        <div className="flex-1 overflow-auto custom-scrollbar">
+                            <div className="flex min-h-full relative">
+                                {/* AI RECONSTRUCTION OVERLAY */}
+                                {proposingContents[activeTab] && (
+                                    <div className="absolute inset-0 z-10 pointer-events-none overflow-hidden flex">
+                                        <div className="w-[60px]" /> {/* Spacer for line numbers */}
+                                        <div className="flex-1 bg-primary-500/5 backdrop-blur-[1px] animate-pulse-slow px-10 pt-10" />
                                     </div>
                                 )}
+
+                                {/* LINE NUMBERS */}
+                                <div className={`p-10 pr-4 text-right font-mono text-[14px] select-none opacity-20 border-r ${isDark ? 'border-white/5' : 'border-black/5'}`} style={{ minWidth: '60px', backgroundColor: 'transparent' }}>
+                                    {(proposingContents[activeTab] || editingContents[activeTab] || '').split('\n').map((_, i) => (
+                                        <div key={i} style={{ height: '1.9em', lineHeight: '1.9em' }}>{i + 1}</div>
+                                    ))}
+                                </div>
+                                
+                                {/* EDITOR CONTENT */}
+                                <div className="flex-1 p-10 pt-10 pl-4 relative">
+                                    {proposingContents[activeTab] && (
+                                        <div className="flex items-center gap-2 mb-6 text-[10px] font-bold text-primary-500 uppercase tracking-widest bg-primary-500/10 w-fit px-3 py-1 rounded-full">
+                                            <Sparkles size={12}/> AI RECONSTRUCTION IN PROGRESS...
+                                        </div>
+                                    )}
+                                    <Editor 
+                                        value={proposingContents[activeTab] || editingContents[activeTab] || ''} 
+                                        onValueChange={code => { setEditingContents(prev => ({ ...prev, [activeTab]: code })); if (code !== originalContents[activeTab]) setPendingChanges(p => ({ ...p, [activeTab]: true })); }} 
+                                        highlight={code => highlight(code, (activeTab.endsWith('.py') ? languages.python : (activeTab.endsWith('.css') ? languages.css : (activeTab.endsWith('.html') ? languages.markup : languages.javascript))), activeTab.split('.').pop())} 
+                                        padding={0} 
+                                        style={{ fontFamily: '"Fira Code", "Fira Mono", monospace', fontSize: 13, minHeight: '100%', outline: 'none', caretColor: isDark ? '#fff' : '#000', color: isDark ? (proposingContents[activeTab] ? '#00ff99' : '#e2e8f0') : (proposingContents[activeTab] ? '#006644' : '#2d2d2d'), lineHeight: '1.9em', transition: 'color 0.3s ease' }} 
+                                    />
+                                    {proposingContents[activeTab] && !isChatStreaming && (
+                                        <div className="mt-12 flex gap-4 animate-in fade-in slide-in-from-top-2 duration-500 pb-10">
+                                            <button onClick={() => { setEditingContents(prev => ({ ...prev, [activeTab]: proposingContents[activeTab] })); setProposingContents(prev => ({ ...prev, [activeTab]: null })); setPendingChanges(prev => ({ ...prev, [activeTab]: true })); }} className="px-6 py-2.5 bg-primary-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-primary-500 shadow-xl shadow-primary-900/40">Accept Reconstruction</button>
+                                            <button onClick={() => setProposingContents(prev => ({ ...prev, [activeTab]: null }))} className={`px-6 py-2.5 rounded-2xl text-[10px] font-black uppercase tracking-widest border border-white/10 hover:bg-white/5 transition-all`}>Discard</button>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     </div>
                 ) : (
-                    <div className="flex-1 flex flex-col items-center justify-center space-y-8 opacity-05"><Brain size={160} className="text-primary-500" /><span className="text-[12px] font-black uppercase tracking-[2em]">Core Stable</span></div>
+                    <div className="flex-1 flex flex-col items-center justify-center space-y-8 opacity-05">
+                        <div className="relative group">
+                            <Brain size={160} className="text-primary-500/10 group-hover:text-primary-500/20 transition-all duration-700" />
+                            <div className="absolute inset-0 bg-primary-500/5 blur-[100px] rounded-full" />
+                        </div>
+                        <span className="text-[12px] font-black uppercase tracking-[2em] opacity-10">Core Stable</span>
+                    </div>
                 )}
                 {/* TELEMETRY FEED - REFINED */}
-                <div className={`h-48 border-t p-6 overflow-auto font-mono text-[11px] space-y-2 custom-scrollbar transition-all duration-700 ${isDark ? 'bg-[#08080a] border-white/5 text-slate-500 shadow-[inset_0_20px_40px_rgba(0,0,0,0.5)]' : 'bg-[#f5f2e8] border-black/5 text-slate-400 shadow-inner'}`}>
+                <div className={`h-48 border-t p-6 overflow-auto font-mono text-[12px] space-y-2 custom-scrollbar transition-all duration-700 ${isDark ? 'bg-[#08080a] border-white/5 text-slate-500 shadow-[inset_0_20px_40px_rgba(0,0,0,0.5)]' : 'bg-[#f5f2e8] border-black/5 text-slate-400 shadow-inner'}`}>
                     <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-3 font-black uppercase tracking-[0.4em] opacity-40 text-primary-500">
                              <Activity size={14} className="animate-pulse" /> 
@@ -924,7 +1002,7 @@ export default function Project() {
         </div>
 
         {/* Chat Sidebar */}
-        <div className={`w-[550px] border-l flex flex-col relative transition-all duration-300 ${showChat ? 'translate-x-0' : 'translate-x-full fixed right-[-550px]'} ${isDark ? 'bg-[#0a0a0c] border-white/5 shadow-2xl shadow-black/80' : 'bg-[#f5f2eb] border-black/[0.05]'}`}>
+        <div className={`w-[460px] border-l flex flex-col relative transition-all duration-300 ${showChat ? 'translate-x-0' : 'translate-x-full fixed right-[-460px]'} ${isDark ? 'bg-[#0a0a0c] border-white/5 shadow-2xl shadow-black/80' : 'bg-[#f5f2eb] border-black/[0.05]'}`}>
             {!showChat && <button onClick={() => setShowChat(true)} className={`absolute left-[-40px] top-1/2 -translate-y-1/2 w-10 h-20 border rounded-l-2xl flex items-center justify-center shadow-2xl hover:scale-105 transition-all ${isDark ? 'bg-[#111114] border-white/10 text-primary-400' : 'bg-[#f5f2eb] border-black/5'}`}><Sparkles size={24} /></button>}
             <div className={`p-8 flex items-center justify-between`}>
                 <div className="flex items-center gap-4"><div className="w-10 h-10 bg-primary-600 rounded-2xl flex items-center justify-center text-white shadow-2xl shadow-primary-600/30"><Zap size={20} /></div><h2 className="text-[14px] font-black uppercase tracking-[0.4em]">HatAI Code</h2></div>
@@ -959,17 +1037,22 @@ export default function Project() {
                     chatMessages.map((msg, i) => (
                         <div key={i} className={`flex flex-col gap-6 w-full animate-slide-up mb-8 last:mb-2 ${msg.role === 'user' ? 'items-end' : 'items-start'}`} style={{ animationDelay: `${i * 100}ms` }}>
                             
-                            {/* Role Header */}
+                            {/* Role Header - ADVANCED */}
                             <div className="flex items-center gap-3 px-1">
                                 {msg.role === 'user' ? (
                                     <>
-                                        <span className="text-[9px] font-black uppercase tracking-[0.3em] opacity-40 text-slate-500">Command Node</span>
-                                        <div className="w-6 h-[1px] bg-slate-500/20" />
+                                        <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-slate-500/10 border border-slate-500/20">
+                                            <span className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500">Command Node</span>
+                                        </div>
+                                        <div className="flex-1 h-[1px] bg-gradient-to-r from-slate-500/20 to-transparent" />
                                     </>
                                 ) : (
                                     <>
-                                        <div className={`w-1.5 h-1.5 rounded-full ring-4 ${isChatStreaming && (i === chatMessages.length - 1) ? 'bg-amber-500 animate-pulse ring-amber-500/20' : 'bg-amber-600 ring-amber-600/10'}`} />
-                                        <span className="text-[9px] font-black uppercase tracking-[0.3em] text-amber-600">Core Engine</span>
+                                        <div className="flex items-center gap-3 px-4 py-1.5 rounded-xl bg-gradient-to-r from-amber-600/20 to-transparent border-l-4 border-amber-600">
+                                            <div className={`w-2 h-2 rounded-full shadow-[0_0_12px_rgba(217,119,6,0.8)] ${isChatStreaming && (i === chatMessages.length - 1) ? 'bg-amber-500 animate-pulse' : 'bg-amber-600'}`} />
+                                            <span className="text-[10px] font-black uppercase tracking-[0.3em] text-amber-600">Core Engine</span>
+                                        </div>
+                                        <div className="flex-1 h-[1px] bg-gradient-to-r from-amber-600/20 to-transparent" />
                                     </>
                                 )}
                             </div>
@@ -994,15 +1077,15 @@ export default function Project() {
                                     {msg.thoughts && (
                                         <div className={`relative p-5 rounded-3xl border transition-all duration-700 group/logic overflow-hidden ${isDark ? 'bg-amber-500/[0.02] border-amber-500/10 hover:border-amber-500/30' : 'bg-amber-50/20 border-amber-100/50 hover:border-amber-200 shadow-sm shadow-amber-900/5'}`}>
                                             <div className="flex items-center gap-4 mb-4">
-                                                <div className="flex items-center gap-3 text-[9px] font-black uppercase tracking-[0.2em] text-amber-500/60">
+                                                <div className="flex items-center gap-3 text-[11px] font-black uppercase tracking-[0.2em] text-amber-500/60">
                                                     <div className="w-2 h-2 rounded-full bg-amber-600/40 animate-ping" />
                                                     Logic Stream
                                                 </div>
                                                 <div className="flex-1 h-[1px] bg-amber-500/10" />
-                                                <div className="text-[8px] font-mono opacity-20 group-hover/logic:opacity-60 transition-opacity uppercase tracking-widest leading-none">Thinking...</div>
+                                                <div className="text-[10px] font-mono opacity-20 group-hover/logic:opacity-60 transition-opacity uppercase tracking-widest leading-none">Thinking...</div>
                                             </div>
-                                            <div className={`text-[12px] leading-relaxed font-medium italic font-mono space-y-2 transition-colors max-h-[160px] overflow-y-auto custom-scrollbar pr-2 ${isDark ? 'text-slate-400 group-hover/logic:text-slate-300' : 'text-slate-500 group-hover/logic:text-slate-800'}`}>
-                                                <ReactMarkdown className="prose-slate prose-invert opacity-80">{msg.thoughts}</ReactMarkdown>
+                                            <div className={`text-[13px] leading-relaxed font-semibold italic font-mono space-y-2 transition-colors max-h-[160px] overflow-y-auto custom-scrollbar pr-2 ${isDark ? 'text-slate-400 group-hover/logic:text-slate-300' : 'text-slate-500 group-hover/logic:text-slate-800'}`}>
+                                                <ReactMarkdown className="prose-slate prose-invert opacity-80">{(msg.thoughts || '').replace(/<\/?(?:think|thought)>/gi, '').trim()}</ReactMarkdown>
                                             </div>
                                             <div className={`absolute -inset-[1px] rounded-3xl bg-gradient-to-br transition-opacity duration-700 pointer-events-none opacity-0 group-hover/logic:opacity-100 ${isDark ? 'from-amber-500/5 via-transparent to-transparent' : 'from-amber-500/5 via-transparent to-transparent'}`} />
                                             {/* Gradient fade to indicate overflow */}
@@ -1018,17 +1101,17 @@ export default function Project() {
                                                         {tc.result ? <Plus size={18} className="rotate-45" /> : <Cpu size={18} className="animate-spin-slow" />}
                                                     </div>
                                                     <div>
-                                                        <p className={`text-[11px] font-black uppercase tracking-[0.2em] ${tc.result ? 'text-green-500' : 'text-primary-500'}`}>{tc.tool}</p>
+                                                        <p className={`text-[12px] font-black uppercase tracking-[0.2em] ${tc.result ? 'text-green-500' : 'text-primary-500'}`}>{tc.tool}</p>
                                                         <div className="flex items-center gap-2 mt-0.5">
                                                             <div className={`w-1.5 h-1.5 rounded-full ${tc.result ? 'bg-green-500' : 'bg-primary-500 animate-pulse'}`} />
-                                                            <p className="text-[10px] opacity-40 font-mono tracking-tighter uppercase">{tc.result ? 'Protocol Executed' : 'Processing Request...'}</p>
+                                                            <p className="text-[11px] opacity-40 font-mono tracking-tighter uppercase">{tc.result ? 'Protocol Executed' : 'Processing Request...'}</p>
                                                         </div>
                                                     </div>
                                                 </div>
                                                 {!tc.result && <div className="flex gap-1.5 px-3 py-1 bg-primary-500/10 rounded-full"><div className="w-1 h-1 bg-primary-500 rounded-full animate-bounce [animation-duration:0.8s]" /><div className="w-1 h-1 bg-primary-500 rounded-full animate-bounce [animation-duration:0.8s] [animation-delay:0.2s]" /><div className="w-1 h-1 bg-primary-500 rounded-full animate-bounce [animation-duration:0.8s] [animation-delay:0.4s]" /></div>}
                                             </div>
                                             {tc.args && (
-                                                <div className={`p-4 rounded-2xl font-mono text-[11px] overflow-x-auto whitespace-pre custom-scrollbar-h ${isDark ? 'bg-black/60 text-slate-400 border border-white/5' : 'bg-white border border-black/[0.03] shadow-inner text-slate-500'}`}>
+                                                <div className={`p-4 rounded-2xl font-mono text-[12px] overflow-x-auto whitespace-pre custom-scrollbar-h ${isDark ? 'bg-black/60 text-slate-400 border border-white/5' : 'bg-white border border-black/[0.03] shadow-inner text-slate-500'}`}>
                                                     <span className="opacity-30 mr-2">$ {tc.tool}_params </span>
                                                     {JSON.stringify(tc.args, null, 2)}
                                                 </div>
@@ -1058,8 +1141,46 @@ export default function Project() {
                                     {msg.content && (
                                         <div className={`prose prose-sm max-w-none prose-p:leading-relaxed prose-p:text-[15px] prose-p:mb-4 last:prose-p:mb-0 prose-strong:text-amber-500 prose-headings:font-black prose-headings:uppercase prose-headings:tracking-[0.2em] prose-headings:text-primary-500/80 transition-colors ${isDark ? 'prose-invert text-slate-300' : 'text-slate-700 font-medium'}`}>
                                             <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
+                                                p({children}) {
+                                                    const text = String(children);
+                                                    const isTree = text.includes('├──') || text.includes('└──') || text.includes('│');
+                                                    if (isTree) {
+                                                        return (
+                                                            <div className={`my-6 p-6 rounded-[28px] font-mono text-[13px] whitespace-pre overflow-x-auto border transition-all ${isDark ? 'bg-black/40 border-white/5 text-primary-400/90 shadow-inner' : 'bg-slate-50 border-black/5 text-slate-700 shadow-sm'}`}>
+                                                                {children}
+                                                            </div>
+                                                        );
+                                                    }
+                                                    return <p className="mb-4 last:mb-0 leading-relaxed text-[15px]">{children}</p>;
+                                                },
                                                 code({node, inline, className, children, ...props}) {
                                                     const match = /language-(\w+)/.exec(className || '')
+                                                    if (!inline && match && match[1] === 'tool') {
+                                                        try {
+                                                            const toolData = JSON.parse(String(children));
+                                                            const toolName = toolData.tool || toolData.action || 'Unknown Protocol';
+                                                            // Support both flattened and nested 'args' format
+                                                            const args = toolData.args || toolData;
+                                                            const toolTarget = args.path || args.target || args.command || args.query || toolData.path || toolData.target || '';
+                                                            
+                                                            return (
+                                                                <div className={`my-4 p-4 rounded-3xl border flex items-center gap-4 transition-all hover:scale-[1.01] ${isDark ? 'bg-primary-500/5 border-primary-500/20 shadow-xl shadow-black/40' : 'bg-primary-50/30 border-primary-100 shadow-sm'}`}>
+                                                                    <div className="w-10 h-10 rounded-2xl bg-primary-600 flex items-center justify-center text-white shadow-xl shadow-primary-600/30">
+                                                                        <Cpu size={18} className="animate-spin-slow" />
+                                                                    </div>
+                                                                    <div className="flex flex-col flex-1 min-w-0">
+                                                                        <span className="text-[10px] font-black uppercase tracking-[0.25em] text-primary-500 opacity-60">Neural Protocol</span>
+                                                                        <span className="text-[13px] font-bold flex items-center gap-2">
+                                                                            {toolName} 
+                                                                            {toolTarget && <span className="opacity-30 font-mono text-[11px] font-medium tracking-tighter truncate max-w-full">→ {toolTarget}</span>}
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        } catch (e) {
+                                                            // Fallback to normal code block
+                                                        }
+                                                    }
                                                     return !inline && match ? (
                                                         <div className="relative group/code mt-8 mb-8 rounded-[30px] overflow-hidden border border-white/5 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.5)]">
                                                             <div className="absolute top-0 right-0 px-5 py-2 bg-white/5 backdrop-blur-3xl text-[10px] font-black uppercase tracking-[0.3em] opacity-40 z-10 border-b border-l border-white/5 transition-opacity group-hover/code:opacity-100">{match[1]}</div>
@@ -1093,12 +1214,44 @@ export default function Project() {
                 <div ref={messagesEndRef} className="h-12" />
             </div>
             <div className="p-8 pb-12 pt-4 relative">
+                {/* MENTIONS & SLASH COMMANDS UI */}
                 {showMentions && mentionFiles.length > 0 && (
                     <div className={`absolute bottom-full left-8 right-8 mb-4 rounded-2xl border shadow-3xl z-[800] overflow-hidden ${isDark ? 'bg-[#1a1a1f] border-white/10 shadow-black' : 'bg-white border-black/10'}`}>
-                        <div className="px-4 py-2 text-[10px] font-black opacity-30 border-b border-white/5 uppercase tracking-widest">Suggest Files</div>
-                        {mentionFiles.map(f => (
-                           <button key={f.path} onClick={() => handleMentionSelect(f)} className={`w-full flex items-center gap-3 px-4 py-3 text-[12px] text-left transition-all ${isDark ? 'hover:bg-primary-600 text-slate-300 hover:text-white' : 'hover:bg-primary-50 text-slate-600 hover:text-primary-700'}`}><FileCode size={14} className="opacity-40" /><span className="font-bold">{f.name}</span><span className="opacity-30 text-[10px] truncate">{f.path}</span></button>
-                        ))}
+                        <div className="px-4 py-2 text-[10px] font-black opacity-30 border-b border-white/5 uppercase tracking-widest">Suggest Files & Folders</div>
+                        <div className="max-h-[300px] overflow-y-auto custom-scrollbar">
+                            {mentionFiles.map(f => (
+                               <button key={f.path} onClick={() => handleMentionSelect(f)} className={`w-full flex items-center gap-3 px-4 py-3 text-[12px] text-left transition-all ${isDark ? 'hover:bg-primary-600 text-slate-300 hover:text-white' : 'hover:bg-primary-50 text-slate-600 hover:text-primary-700'}`}>
+                                   {f.type === 'folder' ? <ChevronRight size={14} className="opacity-40 text-amber-500" /> : <FileCode size={14} className="opacity-40" />}
+                                   <span className="font-bold">{f.name}</span>
+                                   <span className="opacity-30 text-[10px] truncate ml-auto">{f.path}</span>
+                               </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {slashQuery !== null && filteredWorkflows.length > 0 && (
+                    <div className={`absolute bottom-full left-8 right-8 mb-4 rounded-2xl border shadow-3xl z-[800] overflow-hidden ${isDark ? 'bg-[#1a1a1f] border-white/10 shadow-black' : 'bg-white border-black/10'}`}>
+                        <div className="px-4 py-2 text-[10px] font-black opacity-30 border-b border-white/5 uppercase tracking-widest text-primary-500">Available Workflows</div>
+                        <div className="max-h-[300px] overflow-y-auto custom-scrollbar">
+                            {filteredWorkflows.map(w => (
+                               <button key={w.id} onClick={(e) => {
+                                   const lastSlash = chatInput.lastIndexOf('/')
+                                   const before = chatInput.substring(0, lastSlash)
+                                   const after = chatInput.substring(lastSlash + slashQuery.length + 1)
+                                   setChatInput(before + '/' + w.name + ' ' + after)
+                                   chatInputRef.current.focus()
+                               }} className={`w-full flex items-center gap-4 px-4 py-3.5 text-[12px] text-left transition-all border-b last:border-0 ${isDark ? 'hover:bg-primary-600 border-white/5 text-slate-300 hover:text-white' : 'hover:bg-primary-50 border-black/5 text-slate-600 hover:text-primary-700 font-medium'}`}>
+                                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDark ? 'bg-white/5' : 'bg-black/5'}`}>
+                                       <w.icon size={18} className="text-primary-500" />
+                                   </div>
+                                   <div className="flex flex-col">
+                                       <span className="font-black uppercase tracking-widest text-[11px]">{w.name}</span>
+                                       <span className="opacity-40 text-[10px] mt-0.5">{w.desc}</span>
+                                   </div>
+                               </button>
+                            ))}
+                        </div>
                     </div>
                 )}
                 {/* CONTEXT LOCK INDICATOR - ENHANCED */}
@@ -1110,11 +1263,11 @@ export default function Project() {
                     </div>
                 )}
 
-                <div className={`border rounded-[40px] p-3 flex flex-col gap-2 transition-all ${isDark ? 'bg-[#111114] border-white/10 focus-within:border-primary-500/50 shadow-inner' : 'bg-[#ede8d8]/60 border-black/10 focus-within:border-black/20 shadow-sm'}`}>
+                <div className={`border rounded-[32px] p-2 flex flex-col gap-1 transition-all ${isDark ? 'bg-[#111114] border-white/10 focus-within:border-primary-500/50 shadow-inner' : 'bg-[#ede8d8]/60 border-black/10 focus-within:border-black/20 shadow-sm'}`}>
                     
                     {/* ATTACHMENT PREVIEW - NEW */}
                     {attachments.length > 0 && (
-                        <div className="flex gap-4 px-6 pt-4 overflow-x-auto custom-scrollbar-h pb-2">
+                        <div className="flex gap-4 px-4 pt-2 overflow-x-auto custom-scrollbar-h pb-1">
                              {attachments.map((file, idx) => (
                                  <div key={idx} className="relative group shrink-0">
                                      <div className={`w-20 h-20 rounded-2xl overflow-hidden border ${isDark ? 'border-white/10' : 'border-black/10'}`}>
@@ -1128,13 +1281,13 @@ export default function Project() {
 
                     <textarea 
                         ref={chatInputRef} 
-                        className={`w-full bg-transparent px-6 py-5 text-[15px] outline-none min-h-[140px] max-h-[400px] resize-none font-bold transition-all ${isDark ? 'placeholder:opacity-20 text-white' : 'placeholder:opacity-50 text-slate-900'}`} 
+                        className={`w-full bg-transparent px-5 py-3 text-[15px] outline-none min-h-[75px] max-h-[300px] resize-none font-bold transition-all ${isDark ? 'placeholder:opacity-20 text-white' : 'placeholder:opacity-50 text-slate-900'}`} 
                         placeholder="Sync thoughts..." 
                         value={chatInput} 
                         onChange={(e) => setChatInput(e.target.value)} 
                         onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendChat(); } }} 
                     />
-                    <div className="flex items-center justify-between px-5 pb-3">
+                    <div className="flex items-center justify-between px-4 pb-2">
                         <div className="flex gap-2 relative">
                             <input type="file" id="media-upload" className="hidden" onChange={handleFileUpload} accept="image/*,application/pdf" />
                             <button onClick={(e) => { e.stopPropagation(); setIsContextOpen(!isContextOpen); }} className={`w-10 h-10 flex items-center justify-center rounded-full border shadow-sm transition-all duration-300 active:scale-90 ${isContextOpen ? 'bg-primary-600 border-primary-500 text-white shadow-lg' : (isDark ? 'bg-white/5 border-white/10 text-slate-400' : 'bg-white/80 border-black/5 text-slate-500 shadow-sm')}`}>{isUploadingMedia ? <Activity size={18} className="animate-spin" /> : <Plus size={18} className={`transition-transform duration-300 ${isContextOpen ? 'rotate-45' : ''}`} />}</button>
@@ -1152,7 +1305,7 @@ export default function Project() {
                                     </div>
                                 </div>
                             )}
-                            <button onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)} className={`px-6 py-2 rounded-full border text-[10px] font-black uppercase tracking-widest transition-all ${isDark ? 'bg-white/5 border-white/10 text-primary-400 hover:border-primary-500/30' : 'bg-white/80 border-black/5 text-slate-500 shadow-sm'}`}>{selectedModel}</button>
+
                         </div>
                         <button onClick={handleSendChat} disabled={!chatInput.trim() || isChatStreaming} className={`w-12 h-12 rounded-full flex items-center justify-center shadow-2xl transition-all active:scale-90 ${isChatStreaming ? 'bg-primary-500/20 text-primary-500 animate-pulse' : (isDark ? 'bg-primary-600 hover:bg-primary-500 text-white shadow-primary-900/40' : 'bg-white hover:bg-primary-600 text-slate-600 hover:text-white')}`}>{isChatStreaming ? <Bot size={22} className="animate-bounce" /> : <ArrowRight size={24} />}</button>
                     </div>

@@ -53,6 +53,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.type === "request_sync") {
         sendResponse({ buffer: self.historyBuffer });
     }
+    
+    // Ẩn icon extension khỏi toolbar
+    if (request.type === "hide_icon") {
+        chrome.action.hide({ tabId: sender.tab.id });
+        sendResponse({ success: true });
+    }
+    
+    // Hiện lại icon extension
+    if (request.type === "show_icon") {
+        chrome.action.show({ tabId: sender.tab.id });
+        sendResponse({ success: true });
+    }
 });
 
 connect();

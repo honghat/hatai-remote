@@ -3195,25 +3195,62 @@ def tool_project_tree(args: Dict[str, Any]) -> Dict[str, Any]:
 
     logger.info(f"🌳 Project tree: {path} (depth={max_depth})")
     try:
+        # Better find command to get clean list
         cmd = f"find {path} -maxdepth {max_depth} -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/__pycache__/*' -not -path '*/.venv/*' -not -path '*/dist/*' -not -name '.DS_Store' -not -name '*.pyc' | sort"
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
 
         lines = result.stdout.strip().split('\n')
+        if not lines or not lines[0]:
+            return {"tree": "Empty directory.", "path": path}
+
         base = path.rstrip('/')
         tree_lines = []
-        for line in lines[:300]:
-            if not line.strip():
-                continue
+        
+        # File type icons mapping
+        ext_icons = {
+            ".py": "🐍", ".js": "🟨", ".jsx": "⚛️", ".ts": "🟦", ".tsx": "⚛️",
+            ".css": "🎨", ".html": "🌐", ".json": "📦", ".md": "📝", ".env": "🔑",
+            ".yml": "⚙️", ".yaml": "⚙️", ".sh": "🐚", ".git": "🌿"
+        }
+
+        # Simplified tree builder that uses proper prefixing
+        path_list = [l for l in lines if l.strip()]
+        for i, line in enumerate(path_list):
             rel = line.replace(base, '').lstrip('/')
             if not rel:
-                tree_lines.append(f"📁 {os.path.basename(base)}/")
+                tree_lines.append(f"📂 {os.path.basename(base)}/")
                 continue
-            depth = rel.count('/')
-            name = os.path.basename(rel)
-            prefix = "  " * depth
+            
+            parts = rel.split('/')
+            depth = len(parts) - 1
+            name = parts[-1]
+            
             is_dir = os.path.isdir(line)
-            icon = "📁" if is_dir else "📄"
-            tree_lines.append(f"{prefix}{icon} {name}")
+            
+            # Determine icon
+            if is_dir:
+                icon = "📁"
+            else:
+                _, ext = os.path.splitext(name)
+                icon = ext_icons.get(ext.lower(), "📄")
+
+            # Determine prefix parts
+            # This is a simplified approach for the "Agent" view. 
+            # For a really perfect tree with vertical lines we'd need more state, 
+            # but using standard box characters is already 10x better.
+            prefix = "│   " * depth
+            if i + 1 < len(path_list):
+                # If next line is deeper or sibling, use tee
+                next_rel = path_list[i+1].replace(base, '').lstrip('/')
+                next_depth = len(next_rel.split('/')) - 1
+                if next_depth >= depth:
+                    connector = "├── "
+                else:
+                    connector = "└── "
+            else:
+                connector = "└── "
+                
+            tree_lines.append(f"{prefix}{connector}{icon} {name}{'/' if is_dir else ''}")
 
         return {"tree": "\n".join(tree_lines), "path": path, "total_items": len(lines)}
     except Exception as e:
@@ -3418,8 +3455,6 @@ TOOLS = {
 }
 
 
-
-
 _TOOL_ALIASES = {
     "ai_edit": "antigravity",
     "ai_inline": "antigravity",
@@ -3428,6 +3463,14 @@ _TOOL_ALIASES = {
     "ai_codining": "antigravity",
     "ai_code": "antigravity",
     "code_edit": "antigravity",
+    "google": "site_search",
+    "google_search": "site_search",
+    "web_search": "deep_search",
+    "news_search": "deep_search",
+    "search": "deep_search",
+    "browse": "browser_go",
+    "read_web": "browser_read",
+    "get_page": "browser_read",
 }
 
 
