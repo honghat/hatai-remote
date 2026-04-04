@@ -168,10 +168,10 @@ export default function AdminSettings() {
             </div>
             <div>
               <h1 className="text-2xl font-black text-light-900 dark:text-white tracking-tighter">
-                System Administration
+                Quản trị Hệ thống
               </h1>
-              <p className="text-xs text-light-500 dark:text-slate-500 mt-1 uppercase font-black tracking-widest opacity-60">
-                AI Resources & Core Infrastructure
+              <p className="text-[10px] text-light-500 dark:text-slate-500 mt-1 uppercase font-black tracking-widest opacity-60">
+                Tài nguyên AI & Hạ tầng cốt lõi
               </p>
             </div>
           </div>
@@ -180,7 +180,7 @@ export default function AdminSettings() {
                 onClick={handleOpenAdd}
                 className="flex items-center gap-2 px-5 py-2.5 bg-primary-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-primary-500 shadow-lg shadow-primary-500/20 transition-all active:scale-95"
              >
-                <Plus size={14} /> Add Model Connection
+                <Plus size={14} /> Thêm kết nối
              </button>
              <button
                 onClick={() => { fetchHealth(); fetchStatus(); fetchProviders(); }}
@@ -203,9 +203,9 @@ export default function AdminSettings() {
                 <div>
                    <h3 className="text-xl font-black text-light-900 dark:text-white flex items-center gap-3 tracking-tighter">
                       <div className="w-1.5 h-6 bg-primary-600 rounded-full" />
-                      Model Connection Manager
+                      Quản lý kết nối mô hình
                    </h3>
-                   <p className="text-[11px] text-light-500 dark:text-slate-500 font-bold uppercase tracking-[0.2em] mt-1.5 opacity-70">Centralized AI Provider Control Plane</p>
+                   <p className="text-[10px] text-light-500 dark:text-slate-500 font-bold uppercase tracking-[0.2em] mt-1.5 opacity-70">Cấu hình các nhà cung cấp AI</p>
                 </div>
                 <div className="hidden md:flex items-center gap-8 bg-white dark:bg-dark-900/50 p-4 rounded-[24px] border border-light-200 dark:border-slate-800/60 shadow-sm">
                    <div className="flex flex-col items-start px-2 border-r border-light-100 dark:border-slate-800">

@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
+import { Link } from 'react-router-dom'
 import api from '../api'
 import {
   Brain as BrainIcon, Heart, Database, ScrollText, Sparkles, Plus, Trash2, RefreshCw, Send,
   ChevronDown, ChevronRight, Loader2, BookOpen, Eye,
-  MessageCircle, GraduationCap, CheckCircle2, AlertCircle,
+  MessageCircle, GraduationCap, CheckCircle2, AlertCircle, AlertTriangle,
   Edit3, X, Zap, Shield, User, Settings, Filter, Download,
   Activity, ZapOff, Book, Terminal, Cpu
 } from 'lucide-react'
@@ -80,7 +81,7 @@ function KnowledgeModal({ topic, onClose, onUpdate }) {
 
   const fetchEntries = useCallback(() => {
     setLoading(true)
-    api.get(`/memory/knowledge/${topic}`).then(res => {
+    api.get(`/memory/knowledge/${encodeURIComponent(topic)}`).then(res => {
       setEntries(res.data.entries || [])
       setLoading(false)
     })
@@ -91,7 +92,7 @@ function KnowledgeModal({ topic, onClose, onUpdate }) {
   const deleteEntry = async (id) => {
     setDeletingId(id)
     try {
-      await api.delete(`/memory/knowledge/${topic}/${id}`)
+      await api.delete(`/memory/knowledge/${encodeURIComponent(topic)}/${id}`)
       fetchEntries()
     } finally { setDeletingId(null) }
   }
@@ -163,17 +164,19 @@ function TeachModal({ onClose, onTeach }) {
         setTimeout(() => { onTeach(); onClose() }, 800)
       }
     } catch (e) {
-      setResult('Error: ' + (e.response?.data?.detail || e.message))
+      setResult('Lỗi: ' + (e.response?.data?.detail || e.message))
     } finally {
       setSending(false)
     }
   }
 
   const categories = [
-    { key: 'soul', label: 'Personality', desc: 'Core behaviors', icon: Heart, color: 'text-pink-500' },
-    { key: 'knowledge', label: 'Knowledge', desc: 'Facts & data', icon: Database, color: 'text-blue-500' },
-    { key: 'preference', label: 'Preference', desc: 'User habits', icon: User, color: 'text-primary-500' },
+    { key: 'soul', label: 'Tính cách', desc: 'Hành vi cốt lõi', icon: Heart, color: 'text-pink-500' },
+    { key: 'knowledge', label: 'Tri thức', desc: 'Dữ liệu & Sự thật', icon: Database, color: 'text-blue-500' },
+    { key: 'preference', label: 'Sở thích', desc: 'Thói quen user', icon: User, color: 'text-primary-500' },
   ]
+
+  const suggestions = ['Lịch sử', 'Địa lý', 'Văn hóa', 'Đạo đức', 'Toán học', 'Ngôn ngữ', 'Xã hội', 'Kỹ năng sống']
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[110] p-4 animate-fade-in" onClick={onClose}>
@@ -184,8 +187,8 @@ function TeachModal({ onClose, onTeach }) {
                <GraduationCap size={24} />
              </div>
              <div>
-               <h3 className="text-xl font-black text-light-900 dark:text-white">Fine-tune Agent</h3>
-               <p className="text-xs font-medium text-light-400 dark:text-slate-500 uppercase tracking-widest mt-0.5">Injecting neural instructions</p>
+               <h3 className="text-xl font-black text-light-900 dark:text-white">Dạy dỗ & Tinh chỉnh Agent</h3>
+               <p className="text-xs font-medium text-light-400 dark:text-slate-500 uppercase tracking-widest mt-0.5">Cập nhật hệ thống tri thức và tính cách</p>
              </div>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-light-100 dark:hover:bg-dark-800 rounded-full transition-colors">
@@ -195,7 +198,7 @@ function TeachModal({ onClose, onTeach }) {
 
         <div className="p-8 space-y-8">
           <div className="grid grid-cols-1 gap-3">
-            <p className="text-[10px] font-bold text-light-400 dark:text-slate-500 uppercase tracking-[0.2em] mb-1">Memory Segment</p>
+            <p className="text-[10px] font-bold text-light-400 dark:text-slate-500 uppercase tracking-[0.2em] mb-1">Phân vùng bộ nhớ</p>
             <div className="grid grid-cols-3 gap-4">
               {categories.map(c => (
                 <button key={c.key} onClick={() => setCategory(c.key)}
@@ -213,16 +216,33 @@ function TeachModal({ onClose, onTeach }) {
 
           <div className="space-y-6">
             {category === 'knowledge' && (
-              <div className="relative group animate-slide-up">
-                <input value={topic} onChange={e => setTopic(e.target.value)}
-                  placeholder="Knowledge Domain Name (e.g. Finance, Biology)"
-                  className="w-full bg-light-50/80 dark:bg-dark-950/60 border border-light-200 dark:border-slate-800/80 rounded-2xl px-5 py-4 text-sm text-light-900 dark:text-white focus:border-primary-500 focus:bg-white dark:focus:bg-dark-950 outline-none transition-all placeholder:text-light-300 dark:placeholder:text-slate-600 block" />
+              <div className="space-y-4 animate-slide-up">
+                <div>
+                  <p className="text-[10px] font-bold text-light-400 dark:text-slate-500 uppercase tracking-widest mb-3">Kiến thức đề xuất</p>
+                  <div className="flex flex-wrap gap-2">
+                    {suggestions.map(s => (
+                      <button key={s} onClick={() => setTopic(s)}
+                        className={`px-3 py-1.5 rounded-xl text-[10px] font-bold border transition-all ${
+                          topic === s 
+                            ? 'bg-primary-600 border-primary-600 text-white shadow-lg shadow-primary-600/20' 
+                            : 'bg-light-50/50 dark:bg-dark-950/40 border-light-200 dark:border-slate-800 text-light-500 dark:text-slate-400 hover:border-primary-500/50'
+                        }`}>
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="relative group">
+                  <input value={topic} onChange={e => setTopic(e.target.value)}
+                    placeholder="Tên miền tri thức (Ví dụ: Lịch sử, Tài chính...)"
+                    className="w-full bg-light-50/80 dark:bg-dark-950/60 border border-light-200 dark:border-slate-800/80 rounded-2xl px-5 py-4 text-sm text-light-900 dark:text-white focus:border-primary-500 focus:bg-white dark:focus:bg-dark-950 outline-none transition-all placeholder:text-light-300 dark:placeholder:text-slate-600 block" />
+                </div>
               </div>
             )}
 
             <div className="relative animate-slide-up" style={{ animationDelay: '0.1s' }}>
               <textarea value={content} onChange={e => setContent(e.target.value)}
-                placeholder="Describe what the agent should learn, remember, or how its personality should change..."
+                placeholder="Mô tả những gì Agent nên học tập, ghi nhớ hoặc cách thay đổi tính cách..."
                 rows={6}
                 className="w-full bg-light-50/80 dark:bg-dark-950/60 border border-light-200 dark:border-slate-800/80 rounded-[1.5rem] px-5 py-4 text-sm text-light-900 dark:text-white focus:border-primary-500 focus:bg-white dark:focus:bg-dark-950 outline-none transition-all resize-none shadow-inner placeholder:text-light-300 dark:placeholder:text-slate-600 font-medium leading-relaxed" />
               <div className="absolute top-2 right-2 p-2">
@@ -232,8 +252,8 @@ function TeachModal({ onClose, onTeach }) {
           </div>
 
           {result && (
-            <div className={`text-xs px-5 py-4 rounded-2xl font-bold animate-fade-in flex items-center gap-3 ${result.startsWith('Error') ? 'bg-red-500/10 text-red-500' : 'bg-emerald-500/10 text-emerald-500'}`}>
-              {result.startsWith('Error') ? <AlertCircle size={16} /> : <Sparkles size={16} />}
+            <div className={`text-xs px-5 py-4 rounded-2xl font-bold animate-fade-in flex items-center gap-3 ${result.startsWith('Lỗi') ? 'bg-red-500/10 text-red-500' : 'bg-emerald-500/10 text-emerald-500'}`}>
+              {result.startsWith('Lỗi') ? <AlertCircle size={16} /> : <Sparkles size={16} />}
               {result}
             </div>
           )}
@@ -245,7 +265,7 @@ function TeachModal({ onClose, onTeach }) {
             {sending ? <Loader2 size={20} className="animate-spin" /> : (
               <>
                 <Zap size={18} className="group-hover:fill-current" />
-                EXECUTE NEURAL UPDATE
+                CẬP NHẬT TRÍ TUỆ
               </>
             )}
           </button>
@@ -275,7 +295,7 @@ export default function Brain() {
     soul: true,
     preferences: true,
     knowledge: true,
-    scratchpad: true
+    scratchpad: false
   })
 
   const toggleSection = (id) => setOpenSections(prev => ({ ...prev, [id]: !prev[id] }))
@@ -284,8 +304,8 @@ export default function Brain() {
     try {
       const brainRes = await api.get('/memory/overview')
       setData(brainRes.data)
-      setSoulDraft(brainRes.data.soul?.content || '')
-      setScratchDraft(brainRes.data.scratchpad?.content || '')
+      setSoulDraft(brainRes.data?.soul?.content || '')
+      setScratchDraft(brainRes.data?.scratchpad?.content || '')
     } catch (e) {
       console.error('Brain fetch error:', e)
     } finally {
@@ -322,11 +342,38 @@ export default function Brain() {
   }
 
   const deletePreference = async (key) => {
-    try { await api.delete(`/memory/preferences/${key}`); fetchData() } catch {}
+    if (!window.confirm(`Bạn có chắc chắn muốn xóa tùy chỉnh "${key}"?`)) return
+    try { 
+      await api.post(`/memory/preferences/remove`, { key })
+      fetchData() 
+    } catch (e) {
+      alert("Lỗi khi xóa tùy chỉnh: " + (e.response?.data?.detail || e.message))
+    }
   }
 
   const deleteKnowledgeTopic = async (topic) => {
-    try { await api.delete(`/memory/knowledge/${topic}`); fetchData() } catch {}
+    if (!window.confirm(`Bạn có chắc chắn muốn xóa chủ đề tri thức "${topic}"?`)) return
+    try { 
+      await api.post(`/memory/knowledge/remove`, { topic })
+      fetchData() 
+    } catch (e) {
+      alert("Lỗi khi xóa tri thức: " + (e.response?.data?.detail || e.message))
+    }
+  }
+
+  const wipeAllMemory = async () => {
+    if (!window.confirm("CẢNH BÁO: Hành động này sẽ xóa VĨNH VIỄN toàn bộ trí nhớ, kiến thức đã học, các phiên hội thoại và sở thích của Agent. Bạn có chắc chắn muốn thực hiện?")) {
+      return
+    }
+    if (!window.confirm("BẠN CÓ CHẮC CHẮN 100%? Không thể hoàn tác.")) {
+      return
+    }
+    try {
+      await api.delete('/memory/wipe')
+      window.location.reload()
+    } catch (e) {
+      alert("Lỗi khi xóa bộ nhớ: " + e.message)
+    }
   }
 
   if (loading) return (
@@ -337,8 +384,8 @@ export default function Brain() {
           <BrainIcon className="animate-spin-slow text-primary-500 relative" size={64} />
         </div>
         <div className="flex flex-col items-center gap-2">
-           <p className="text-lg font-black text-light-900 dark:text-white tracking-widest uppercase">Initializing Neural Link</p>
-           <p className="text-xs font-bold text-light-400 dark:text-slate-500 uppercase tracking-widest animate-pulse">Syncing Synapses...</p>
+           <p className="text-lg font-black text-light-900 dark:text-white tracking-widest uppercase">Đang khởi động</p>
+           <p className="text-xs font-bold text-light-400 dark:text-slate-500 uppercase tracking-widest animate-pulse">Cập nhật trí tuệ...</p>
         </div>
       </div>
     </div>
@@ -357,11 +404,8 @@ export default function Brain() {
           </div>
           <div className="flex-1">
             <h1 className="text-xl font-extrabold text-light-900 dark:text-white tracking-tight">
-              HatAI Brain Central
+              Trí nhớ Agent
             </h1>
-            <p className="text-xs text-light-400 dark:text-slate-500 mt-0.5 uppercase tracking-widest font-bold">
-              Neural interface & Memory management
-            </p>
           </div>
           <div className="flex items-center gap-3">
             <button onClick={fetchData} title="Sync Synapses" className="p-2.5 text-light-500 dark:text-slate-400 hover:text-primary-500 bg-white dark:bg-dark-900 border border-light-200 dark:border-slate-800 rounded-xl transition-all shadow-sm">
@@ -369,7 +413,7 @@ export default function Brain() {
             </button>
             <button onClick={() => setShowTeach(true)} className="flex items-center gap-2 bg-primary-600 text-white px-4 py-2.5 rounded-xl hover:bg-primary-500 transition-all font-bold text-xs shadow-lg shadow-primary-600/20 active:scale-95 group">
               <GraduationCap size={16} />
-              INJECT DATA
+              DẠY AGENT
             </button>
           </div>
         </div>
@@ -377,63 +421,23 @@ export default function Brain() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto bg-[#F8FAFC] dark:bg-[#030711] p-6 lg:p-10 space-y-12 custom-scrollbar">
-        {/* Dynamic Header Stats */}
-        <div className="relative">
-        <div className="absolute -top-24 -left-24 w-96 h-96 bg-primary-500/10 blur-[120px] rounded-full pointer-events-none" />
-        <div className="absolute -bottom-24 -right-24 w-96 h-96 bg-primary-500/10 blur-[120px] rounded-full pointer-events-none" />
-        
-        <div className="relative flex flex-col xl:flex-row xl:items-center justify-between gap-8 pb-10">
-          <div className="flex items-center gap-8">
-            <div className="relative group">
-              <div className="absolute inset-0 bg-primary-500/30 blur-2xl rounded-[2.5rem] opacity-0 group-hover:opacity-100 transition-all duration-700" />
-              <div className="w-24 h-24 bg-white dark:bg-dark-900 border border-light-200 dark:border-slate-800 rounded-[2.5rem] flex items-center justify-center shadow-2xl relative transition-transform duration-700 group-hover:rotate-[360deg] group-hover:scale-110">
-                <BrainIcon size={44} className="text-primary-600 dark:text-primary-500" />
-              </div>
-              <div className="absolute -bottom-1 -right-1 w-8 h-8 bg-emerald-500 rounded-2xl flex items-center justify-center border-4 border-white dark:border-dark-950 shadow-lg">
-                <Activity size={14} className="text-white animate-pulse" />
-              </div>
-            </div>
-            <div>
-              <div className="flex items-center gap-3 mb-2">
-                <span className="px-3 py-1 bg-primary-500/10 text-primary-600 dark:text-primary-500 text-[10px] font-black uppercase tracking-[0.2em] rounded-full border border-primary-500/20">System-level Access</span>
-                <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.5)]" />
-              </div>
-              <h1 className="text-5xl font-black text-light-900 dark:text-white tracking-tighter">HatAI Brain Central</h1>
-              <p className="text-sm font-medium text-light-500 dark:text-slate-400 mt-2 max-w-xl leading-relaxed">
-                Direct neural interface for modifying personality cores, injected knowledge graphs, and persistent user preferences.
-              </p>
-            </div>
-          </div>
-          
-          <div className="flex items-center gap-4">
-            <button onClick={fetchData} className="w-14 h-14 flex items-center justify-center text-light-500 dark:text-slate-400 hover:text-primary-500 bg-white dark:bg-dark-900 border border-light-200 dark:border-slate-800 rounded-3xl transition-all shadow-xl hover:shadow-primary-500/10 hover:-translate-y-1 active:scale-90">
-              <RefreshCw size={24} />
-            </button>
-            <button onClick={() => setShowTeach(true)} className="flex items-center gap-3 bg-primary-600 text-white px-10 py-5 rounded-3xl hover:bg-primary-500 transition-all font-black text-sm shadow-2xl shadow-primary-600/30 active:scale-95 group">
-              <GraduationCap size={22} className="group-hover:rotate-12 transition-transform" />
-              INJECT NEW DATA
-            </button>
-          </div>
-        </div>
-
         {/* Quick Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-fade-in">
           <StatTile label="Knowledge Chunks" value={totalKnowledge} icon={Database} colorClass="text-blue-500" />
           <StatTile label="Personality State" value={b.soul?.content ? 'DEFINED' : 'VACUUM'} icon={Heart} colorClass="text-pink-500" />
-          <StatTile label="Preferences" value={Object.keys(b.preferences || {}).length} icon={User} colorClass="text-primary-500" />
+          <StatTile label="Preferences" value={Object.keys(b.preferences || {}).filter(k => !k.startsWith('_')).length} icon={User} colorClass="text-primary-500" />
         </div>
-      </div>
-
-      {/* Main Neural Map */}
+      
+        {/* Main Neural Map */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 lg:gap-10">
         
         {/* Core Identity */}
         <div className="xl:col-span-12 space-y-8 lg:space-y-10">
-          <Card title="Personality Core (soul_memory.md)" icon={Heart} color="pink" 
+          <Card title="Tính cách & Bản sắc" icon={Heart} color="pink" 
             isOpen={openSections.soul} onToggle={() => toggleSection('soul')}
             extra={!editingSoul && (
               <button onClick={() => setEditingSoul(true)} className="flex items-center gap-2 px-6 py-2.5 bg-pink-500/10 text-pink-500 hover:bg-pink-500 hover:text-white rounded-2xl transition-all font-bold text-xs border border-pink-500/20 group">
-                <Edit3 size={14} className="group-hover:rotate-12 transition-transform" /> REPROGRAM
+                <Edit3 size={14} className="group-hover:rotate-12 transition-transform" /> CHỈNH SỬA
               </button>
             )}>
             <div className="space-y-6">
@@ -446,9 +450,9 @@ export default function Brain() {
                       className="w-full bg-light-50/50 dark:bg-dark-950/50 border border-pink-500/20 rounded-[2rem] px-8 py-8 md:pl-14 text-xs text-light-800 dark:text-slate-300 font-mono focus:border-pink-500/50 outline-none transition-all shadow-inner leading-relaxed custom-scrollbar" />
                   </div>
                   <div className="flex justify-end items-center gap-6">
-                    <button onClick={() => { setEditingSoul(false); setSoulDraft(b.soul?.content || '') }} className="text-xs font-black text-light-400 hover:text-light-900 dark:hover:text-white transition-colors uppercase tracking-[0.2em]">ABORT</button>
+                    <button onClick={() => { setEditingSoul(false); setSoulDraft(b.soul?.content || '') }} className="text-xs font-black text-light-400 hover:text-light-900 dark:hover:text-white transition-colors uppercase tracking-[0.2em]">HỦY</button>
                     <button onClick={saveSoul} disabled={savingSoul} className="bg-pink-600 text-white text-xs font-black px-10 py-4 rounded-2xl hover:bg-pink-500 transition-all shadow-xl shadow-pink-600/20 hover:-translate-y-1 active:translate-y-0">
-                      {savingSoul ? 'SYNCING...' : 'COMMIT TO SOUL'}
+                      {savingSoul ? 'ĐANG LƯU...' : 'CẬP NHẬT TÍNH CÁCH'}
                     </button>
                   </div>
                 </div>
@@ -466,159 +470,173 @@ export default function Brain() {
 
         </div>
 
-        {/* Global Data Structures */}
-        <div className="xl:col-span-12 space-y-8 lg:space-y-10">
-          
-          {/* Neural Domains */}
+        {/* ── Unified Personal Intelligence ─────────────────────── */}
+        <div className="xl:col-span-12 space-y-8 lg:space-y-10 animate-slide-in" style={{ animationDelay: '0.1s' }}>
           <Card 
-            title="Neural Domains" 
+            title="Bộ nhớ & Năng lực cá nhân" 
             icon={Database} 
             color="blue" 
-            count={b.knowledge?.total_topics || 0}
+            count={(b.knowledge?.total_topics || 0) + (Object.keys(b.preferences || {}).filter(k => !k.startsWith('_')).length) + (b.skills?.total || 0)}
             isOpen={openSections.knowledge}
             onToggle={() => toggleSection('knowledge')}
           >
-            <div className="mt-4 overflow-hidden border border-light-200 dark:border-slate-800/60 rounded-2xl bg-white dark:bg-dark-950/20">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-light-50/50 dark:bg-white/[0.02] border-b border-light-200 dark:border-slate-800/60">
-                    <th className="px-6 py-4 text-[10px] font-black text-light-400 dark:text-slate-500 uppercase tracking-widest">Miền tri thức</th>
-                    <th className="px-6 py-4 text-[10px] font-black text-light-400 dark:text-slate-500 uppercase tracking-widest text-center">Dữ liệu (Chunks)</th>
-                    <th className="px-6 py-4 text-[10px] font-black text-light-400 dark:text-slate-500 uppercase tracking-widest text-center">Trạng thái</th>
-                    <th className="px-6 py-4 text-[10px] font-black text-light-400 dark:text-slate-500 uppercase tracking-widest text-right">Hành động</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-light-100 dark:divide-slate-800/40">
-                  {b.knowledge?.topics?.map((t, i) => (
-                    <tr key={t.topic} className="group hover:bg-light-50/50 dark:hover:bg-white/[0.01] transition-colors">
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
-                          <div onClick={() => setViewingKnowledgeTopic(t.topic)} className="w-10 h-10 bg-blue-500/10 rounded-xl flex items-center justify-center text-blue-600 dark:text-blue-400 cursor-pointer hover:bg-blue-600 hover:text-white transition-all shadow-inner">
-                            <Book size={18} />
-                          </div>
-                          <span className="text-sm font-bold text-light-900 dark:text-white capitalize cursor-pointer hover:text-primary-500" onClick={() => setViewingKnowledgeTopic(t.topic)}>
-                            {t.topic}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-center">
-                        <span className="px-2.5 py-1 rounded-lg bg-blue-500/5 text-blue-600 dark:text-blue-400 text-xs font-bold border border-blue-500/10">
-                          {t.count}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-center">
-                        <div className="flex items-center justify-center gap-1.5">
-                          <div className={`w-1.5 h-1.5 rounded-full ${t.count > 0 ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]' : 'bg-light-300 dark:bg-slate-700'}`} />
-                          <span className="text-[10px] font-bold text-light-400 dark:text-slate-500 uppercase tracking-wider">
-                            {t.count > 0 ? 'Active' : 'Empty'}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-right space-x-2">
-                        <button onClick={() => setViewingKnowledgeTopic(t.topic)} className="p-2 text-light-400 hover:text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all">
-                          <Eye size={16} />
-                        </button>
-                        <button onClick={() => deleteKnowledgeTopic(t.topic)} className="p-2 text-light-400 hover:text-red-500 hover:bg-red-500/5 rounded-lg transition-all">
-                          <Trash2 size={16} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {(!b.knowledge?.topics || b.knowledge.topics.length === 0) && (
-                    <tr>
-                      <td colSpan="4" className="px-6 py-12 text-center">
-                        <div className="flex flex-col items-center opacity-30">
-                          <Database size={32} className="mb-2" />
-                          <p className="text-xs font-bold uppercase tracking-widest text-light-400">Không có miền tri thức nào</p>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </Card>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
+              {/* Preferences Section */}
+              <div className="space-y-6">
+                <div className="flex items-center justify-between border-b border-light-100 dark:border-slate-800/40 pb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-primary-500/10 rounded-lg text-primary-500"><User size={16} /></div>
+                    <div>
+                      <h4 className="text-sm font-black text-light-900 dark:text-white uppercase tracking-widest">Ghi nhớ & Tùy chỉnh</h4>
+                      <p className="text-[10px] font-bold text-light-400 dark:text-slate-500 uppercase tracking-tighter">Personal Context</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setEditingPreference({key: '', value: ''})} className="px-4 py-2 bg-primary-600/10 text-primary-600 hover:bg-primary-600 hover:text-white rounded-xl transition-all text-[10px] font-black uppercase tracking-widest">
+                    THÊM
+                  </button>
+                </div>
 
-          {/* Preferences */}
-          <Card 
-            title="Active Preferences" 
-            icon={User} 
-            color="primary" 
-            isOpen={openSections.preferences}
-            onToggle={() => toggleSection('preferences')}
-            className="xl:col-span-12"
-          >
-            <div className="mt-4 overflow-hidden border border-light-200 dark:border-slate-800/60 rounded-2xl bg-white dark:bg-dark-950/20">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-light-50/50 dark:bg-white/[0.02] border-b border-light-200 dark:border-slate-800/60">
-                    <th className="px-6 py-4 text-[10px] font-black text-light-400 dark:text-slate-500 uppercase tracking-widest w-1/3">Tên khóa (Key)</th>
-                    <th className="px-6 py-4 text-[10px] font-black text-light-400 dark:text-slate-500 uppercase tracking-widest">Giá trị (Value)</th>
-                    <th className="px-6 py-4 text-[10px] font-black text-light-400 dark:text-slate-500 uppercase tracking-widest text-right">Hành động</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-light-100 dark:divide-slate-800/40">
+                <div className="space-y-3 max-h-[400px] overflow-y-auto custom-scrollbar pr-2">
                   {Object.entries(b.preferences || {}).filter(([k]) => !k.startsWith('_')).map(([k, v], i) => (
-                    <tr key={k} className="group hover:bg-light-50/50 dark:hover:bg-white/[0.01] transition-colors">
-                      <td className="px-6 py-4">
-                        <span className="text-[11px] font-black text-primary-600 dark:text-primary-400 uppercase tracking-widest bg-primary-500/5 px-2 py-1 rounded-md border border-primary-500/10">
-                          {k}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        {editingPreference?.key === k ? (
-                          <div className="flex gap-2 animate-slide-in">
-                            <input value={editingPreference.value} onChange={e => setEditingPreference({...editingPreference, value: e.target.value})}
-                              className="flex-1 bg-white dark:bg-dark-900 border border-primary-500/50 rounded-xl px-4 py-2 text-xs text-light-900 dark:text-white outline-none focus:ring-2 ring-primary-500/10 shadow-inner" />
-                            <button onClick={() => savePreference(editingPreference.key, editingPreference.value)} className="bg-primary-600 text-white p-2 rounded-xl hover:bg-primary-500 shadow-lg shadow-primary-600/20 transition-all">
-                              <CheckCircle2 size={16} />
-                            </button>
-                            <button onClick={() => setEditingPreference(null)} className="text-light-400 p-2 hover:text-light-900 transition-colors">
-                              <X size={16} />
-                            </button>
+                    <div key={k} className="p-4 bg-light-50/50 dark:bg-white/[0.02] border border-light-200 dark:border-slate-800/40 rounded-2xl group hover:border-primary-500/30 transition-all">
+                       <div className="flex items-center justify-between gap-4">
+                          <div className="flex-1">
+                             <p className="text-[10px] font-black text-light-400 dark:text-slate-500 uppercase tracking-widest mb-1">{k}</p>
+                             {editingPreference?.key === k ? (
+                               <div className="flex gap-2">
+                                 <input value={editingPreference.value} onChange={e => setEditingPreference({...editingPreference, value: e.target.value})}
+                                   className="flex-1 bg-white dark:bg-dark-900 border border-primary-500/30 rounded-lg px-3 py-1 text-xs outline-none" autoFocus />
+                                 <button onClick={() => { savePreference(k, editingPreference.value); setEditingPreference(null) }} className="text-emerald-500 p-1 hover:bg-emerald-500/10 rounded"><CheckCircle2 size={16} /></button>
+                               </div>
+                             ) : (
+                               <p className="text-sm font-bold text-light-800 dark:text-slate-200 leading-snug">{v}</p>
+                             )}
                           </div>
-                        ) : (
-                          <p className="text-sm font-medium text-light-800 dark:text-slate-300">
-                            {v}
-                          </p>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 text-right space-x-2">
-                        {!editingPreference && (
-                          <>
-                            <button onClick={() => setEditingPreference({key: k, value: v})} className="p-2 text-light-400 hover:text-primary-500 hover:bg-primary-500/10 rounded-lg transition-all">
-                              <Edit3 size={16} />
-                            </button>
-                            <button onClick={() => deletePreference(k)} className="p-2 text-light-400 hover:text-red-500 hover:bg-red-500/5 rounded-lg transition-all">
-                              <Trash2 size={16} />
-                            </button>
-                          </>
-                        )}
-                      </td>
-                    </tr>
+                          {!editingPreference && (
+                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                               <button onClick={() => setEditingPreference({key: k, value: v})} className="p-2 text-light-400 hover:text-primary-500 hover:bg-primary-500/10 rounded-lg"><Edit3 size={14} /></button>
+                               <button onClick={() => deletePreference(k)} className="p-2 text-light-400 hover:text-red-500 hover:bg-red-500/10 rounded-lg"><Trash2 size={14} /></button>
+                            </div>
+                          )}
+                       </div>
+                    </div>
                   ))}
                   {Object.entries(b.preferences || {}).filter(([k]) => !k.startsWith('_')).length === 0 && (
-                    <tr>
-                      <td colSpan="3" className="px-6 py-12 text-center text-light-400 dark:text-slate-600 opacity-30">
-                        <div className="flex flex-col items-center">
-                          <User size={32} className="mb-2" />
-                          <p className="text-xs font-bold uppercase tracking-widest">Không có tùy chỉnh nào</p>
-                        </div>
-                      </td>
-                    </tr>
+                    <div className="py-10 text-center opacity-30">
+                       <User size={24} className="mx-auto mb-2" />
+                       <p className="text-[10px] font-bold uppercase">Trống</p>
+                    </div>
                   )}
-                </tbody>
-              </table>
+                </div>
+              </div>
+
+              {/* Knowledge Section */}
+              <div className="space-y-6">
+                <div className="flex items-center justify-between border-b border-light-100 dark:border-slate-800/40 pb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-blue-500/10 rounded-lg text-blue-500"><Database size={16} /></div>
+                    <div>
+                      <h4 className="text-sm font-black text-light-900 dark:text-white uppercase tracking-widest">Kho tri thức</h4>
+                      <p className="text-[10px] font-bold text-light-400 dark:text-slate-500 uppercase tracking-tighter">Neural Index (RAG)</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 max-h-[400px] overflow-y-auto custom-scrollbar pr-2">
+                  {b.knowledge?.topics?.map((t, i) => (
+                    <div key={t.topic} className="p-4 bg-light-50/50 dark:bg-white/[0.02] border border-light-200 dark:border-slate-800/40 rounded-2xl group hover:border-blue-500/30 transition-all cursor-pointer relative" onClick={() => setViewingKnowledgeTopic(t.topic)}>
+                       <div className="flex items-center gap-3">
+                          <div className="p-2.5 bg-blue-500/10 rounded-xl text-blue-500 group-hover:scale-110 transition-transform">
+                             <BookOpen size={16} />
+                          </div>
+                          <div className="flex-1 pr-6">
+                             <h4 className="text-xs font-black text-light-900 dark:text-white capitalize truncate">{t.topic}</h4>
+                             <p className="text-[9px] font-bold text-light-400 dark:text-slate-500 uppercase tracking-tighter">{t.count} indexed nodes</p>
+                          </div>
+                       </div>
+                       <button onClick={(e) => { e.stopPropagation(); deleteKnowledgeTopic(t.topic); }} className="absolute top-2 right-2 p-1.5 text-light-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all">
+                          <Trash2 size={12} />
+                       </button>
+                    </div>
+                  ))}
+                  {(!b.knowledge?.topics || b.knowledge?.topics?.length === 0) && (
+                    <div className="py-10 text-center opacity-30">
+                       <Database size={24} className="mx-auto mb-2" />
+                       <p className="text-[10px] font-bold uppercase tracking-widest">Không có tri thức</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Skills Section */}
+              <div className="space-y-6">
+                <div className="flex items-center justify-between border-b border-light-100 dark:border-slate-800/40 pb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-500"><Zap size={16} /></div>
+                    <div>
+                      <h4 className="text-sm font-black text-light-900 dark:text-white uppercase tracking-widest">Công cụ Trí nhớ Agent</h4>
+                      <p className="text-[10px] font-bold text-light-400 dark:text-slate-500 uppercase tracking-tighter">Python Extensions</p>
+                    </div>
+                  </div>
+                  <Link to="/skills" className="px-4 py-2 bg-emerald-600/10 text-emerald-600 hover:bg-emerald-600 hover:text-white rounded-xl transition-all text-[10px] font-black uppercase tracking-widest">
+                    QUẢN LÝ
+                  </Link>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 max-h-[400px] overflow-y-auto custom-scrollbar pr-2">
+                  {b.skills?.list?.map((s, i) => (
+                    <div key={s.id} className="p-4 bg-light-50/50 dark:bg-white/[0.02] border border-light-200 dark:border-slate-800/40 rounded-2xl group hover:border-emerald-500/30 transition-all">
+                       <div className="flex items-center gap-3">
+                          <div className={`p-2.5 rounded-xl transition-transform ${s.enabled ? 'bg-emerald-500/10 text-emerald-500' : 'bg-slate-500/10 text-slate-500'}`}>
+                             <Terminal size={16} />
+                          </div>
+                          <div className="flex-1">
+                             <h4 className="text-xs font-black text-light-900 dark:text-white">{s.name}</h4>
+                             <p className="text-[9px] font-bold text-light-400 dark:text-slate-500 uppercase tracking-tighter font-mono">{s.tool_name}</p>
+                          </div>
+                       </div>
+                    </div>
+                  ))}
+                  {(!b.skills?.list || b.skills?.list?.length === 0) && (
+                    <div className="py-10 text-center opacity-30">
+                       <Zap size={24} className="mx-auto mb-2" />
+                       <p className="text-[10px] font-bold uppercase tracking-widest">Chưa có kỹ năng</p>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </Card>
-
         </div>
-      </div>
 
-      {/* Overlays */}
-      {showTeach && <TeachModal onClose={() => setShowTeach(false)} onTeach={fetchData} />}
-      {viewingKnowledgeTopic && <KnowledgeModal topic={viewingKnowledgeTopic} onClose={() => setViewingKnowledgeTopic(null)} onUpdate={fetchData} />}
+        {/* Danger Zone */}
+        <div className="xl:col-span-12 mt-10">
+          <Card title="Phân vùng Nguy hiểm" icon={AlertTriangle} color="orange" className="border-red-500/20 bg-red-500/5">
+            <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+              <div>
+                <h3 className="text-lg font-black text-red-600 dark:text-red-400 flex items-center gap-2 mb-1">
+                  Cảnh báo Hệ thống
+                </h3>
+                <p className="text-sm text-red-500/60 font-medium leading-relaxed">
+                  Xóa sạch toàn bộ tri thức, kỹ năng và ghi nhớ đã học của User này. Hành động không thể hoàn tác.
+                </p>
+              </div>
+              <button 
+                onClick={wipeAllMemory}
+                className="w-full md:w-auto px-8 py-3 bg-red-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-red-500 transition-all shadow-lg shadow-red-600/20 active:scale-95 flex items-center justify-center gap-2"
+              >
+                <Trash2 size={16} /> XÓA SẠCH TRÍ NHỚ
+              </button>
+            </div>
+          </Card>
+        </div>
+
+      </div>
     </div>
+
+    {/* Overlays */}
+    {showTeach && <TeachModal onClose={() => setShowTeach(false)} onTeach={fetchData} />}
+    {viewingKnowledgeTopic && <KnowledgeModal topic={viewingKnowledgeTopic} onClose={() => setViewingKnowledgeTopic(null)} onUpdate={fetchData} />}
   </div>
 )
 }

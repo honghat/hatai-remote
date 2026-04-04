@@ -203,7 +203,7 @@ class RAGEngine:
                         return None
         return self._embedding_fn
 
-    def _get_collection(self, topic: str):
+    def _get_collection(self, topic: str, user_id: int = 1):
         if not self.enabled:
             return None
 
@@ -211,34 +211,36 @@ class RAGEngine:
         import re
 
         with self._collection_lock:
+            # Topic name normalization
             n_text = unicodedata.normalize('NFKD', topic.strip().lower())
             ascii_text = n_text.encode('ascii', 'ignore').decode('ascii')
             clean_topic = re.sub(r'[^a-z0-9_]', '_', ascii_text)
             clean_topic = re.sub(r'_+', '_', clean_topic).strip('_')
 
             if not clean_topic:
-                clean_topic = "general_knowledge"
+                clean_topic = "general"
 
-            clean_topic = clean_topic[:60]
+            # Prepend user ID to isolate collections
+            col_name = f"u{user_id}_{clean_topic}"[:63] # Limit to 63 chars (chroma limit)
 
-            if clean_topic not in self.collections:
+            if col_name not in self.collections:
                 ef = self.embedding_fn
                 try:
-                    self.collections[clean_topic] = self.client.get_or_create_collection(
-                        name=clean_topic,
+                    self.collections[col_name] = self.client.get_or_create_collection(
+                        name=col_name,
                         embedding_function=ef
                     )
                 except Exception as e:
-                    logger.error(f"Failed to get/create collection '{clean_topic}': {e}")
+                    logger.error(f"Failed to get/create collection '{col_name}': {e}")
                     return None
-            return self.collections[clean_topic]
+            return self.collections[col_name]
 
-    def add_knowledge_batch(self, topic: str, documents: List[str], metadatas: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def add_knowledge_batch(self, topic: str, documents: List[str], metadatas: List[Dict[str, Any]], user_id: int = 1) -> Dict[str, Any]:
         """Add multiple documents to a topic collection efficiently."""
         if not self.enabled:
             return {"error": "RAG engine is not installed/enabled"}
 
-        collection = self._get_collection(topic)
+        collection = self._get_collection(topic, user_id=user_id)
         if not collection:
             return {"error": "Could not access knowledge collection"}
 
@@ -276,7 +278,7 @@ class RAGEngine:
             logger.error(f"Error in batch indexing: {e}")
             return {"error": str(e)}
 
-    def add_knowledge(self, topic: str, content: str, source: str = "agent") -> Dict[str, Any]:
+    def add_knowledge(self, topic: str, content: str, source: str = "agent", user_id: int = 1) -> Dict[str, Any]:
         """Split content into chunks and add to the topic collection."""
         if not self.enabled:
             return {"error": "RAG engine is not installed/enabled"}
@@ -284,7 +286,7 @@ class RAGEngine:
         if not content.strip():
             return {"error": "Content is empty"}
 
-        collection = self._get_collection(topic)
+        collection = self._get_collection(topic, user_id=user_id)
         if not collection:
             return {"error": "Could not access knowledge collection"}
 
@@ -308,7 +310,7 @@ class RAGEngine:
             logger.error(f"Error adding knowledge: {e}")
             return {"error": str(e)}
 
-    def query_knowledge(self, topic: str, query: str, n_results: int = 3, max_distance: float = 1.5) -> Dict[str, Any]:
+    def query_knowledge(self, topic: str, query: str, n_results: int = 3, max_distance: float = 1.5, user_id: int = 1) -> Dict[str, Any]:
         """Query the most relevant content from the topic collection.
 
         Args:
@@ -318,7 +320,7 @@ class RAGEngine:
         if not self.enabled:
             return {"error": "RAG engine is not installed/enabled"}
 
-        collection = self._get_collection(topic)
+        collection = self._get_collection(topic, user_id=user_id)
         if not collection:
             return {"error": "Could not access knowledge collection"}
 
@@ -378,24 +380,31 @@ class RAGEngine:
             logger.error(f"Error querying knowledge: {e}")
             return {"error": str(e)}
 
-    def list_topics(self) -> List[str]:
-        """Return list of existing topic collections."""
+    def list_topics(self, user_id: int = 1) -> List[str]:
+        """Return list of existing topic collections for a specific user."""
         if not self.enabled:
             return []
         try:
             cols = self.client.list_collections()
-            return [getattr(c, 'name', str(c)) for c in cols]
+            prefix = f"u{user_id}_"
+            return [c.name.replace(prefix, "") for c in cols if c.name.startswith(prefix)]
         except Exception:
             return []
 
-    def delete_topic(self, topic: str) -> Dict[str, Any]:
-        """Delete an entire topic collection."""
+    def delete_topic(self, topic: str, user_id: int = 1) -> Dict[str, Any]:
+        """Delete an entire topic collection for a specific user."""
         if not self.enabled:
             return {"error": "RAG engine is not installed/enabled"}
 
-        clean_topic = "".join(c if c.isalnum() else "_" for c in topic.strip().lower()[:50])
-        if not clean_topic:
-            clean_topic = "general_knowledge"
+        # Use same normalization as _get_collection
+        import unicodedata, re as _re
+        n_text = unicodedata.normalize('NFKD', topic.strip().lower())
+        ascii_text = n_text.encode('ascii', 'ignore').decode('ascii')
+        clean_topic = _re.sub(r'[^a-z0-9_]', '_', ascii_text)
+        clean_topic = _re.sub(r'_+', '_', clean_topic).strip('_')
+        if not clean_topic: clean_topic = "general"
+        
+        col_name = f"u{user_id}_{clean_topic}"[:63]
 
         try:
             self.client.delete_collection(name=clean_topic)

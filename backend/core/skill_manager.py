@@ -8,51 +8,58 @@ import json
 import importlib.util
 import logging
 import traceback
+import threading
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+from pathlib import Path
 
 logger = logging.getLogger("SkillManager")
-
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
-SKILLS_DIR = os.path.join(DATA_DIR, "skills")
-REGISTRY_FILE = os.path.join(SKILLS_DIR, "skills_registry.json")
-
-os.makedirs(SKILLS_DIR, exist_ok=True)
 
 
 class SkillManager:
     """Manages user-defined skills (Python tools) for the Agent."""
 
-    _instance = None
+    _instances: Dict[int, "SkillManager"] = {}
+    _lock = threading.Lock()
 
     @classmethod
-    def get(cls) -> "SkillManager":
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
+    def get(cls, owner_id: int = 1) -> "SkillManager":
+        """Get SkillManager instance for a specific user ID."""
+        with cls._lock:
+            if owner_id not in cls._instances:
+                cls._instances[owner_id] = cls(owner_id)
+        return cls._instances[owner_id]
 
-    def __init__(self):
+    def __init__(self, owner_id: int):
+        self.owner_id = owner_id
         self._registry: List[Dict[str, Any]] = []
         self._loaded_tools: Dict[str, callable] = {}
         self._tool_definitions: str = ""
+        
+        # User-specific skills directory
+        from core.config import DATA_DIR
+        self.skills_dir = Path(DATA_DIR) / "users" / str(owner_id) / "skills"
+        self.skills_dir.mkdir(parents=True, exist_ok=True)
+        self.registry_file = self.skills_dir / "skills_registry.json"
+        
         self._load_registry()
         self._load_all_skills()
 
     # ── Registry I/O ──────────────────────────────────────────────
 
     def _load_registry(self):
-        if os.path.isfile(REGISTRY_FILE):
+        if self.registry_file.exists():
             try:
-                with open(REGISTRY_FILE, "r", encoding="utf-8") as f:
+                with open(self.registry_file, "r", encoding="utf-8") as f:
                     self._registry = json.load(f)
             except Exception as e:
-                logger.error(f"Failed to load skills registry: {e}")
+                logger.error(f"Failed to load skills registry for user {self.owner_id}: {e}")
                 self._registry = []
         else:
             self._registry = []
 
     def _save_registry(self):
-        with open(REGISTRY_FILE, "w", encoding="utf-8") as f:
+        with open(self.registry_file, "w", encoding="utf-8") as f:
             json.dump(self._registry, f, ensure_ascii=False, indent=2)
 
     # ── Skill Loading ─────────────────────────────────────────────
@@ -62,15 +69,15 @@ class SkillManager:
         if not skill.get("enabled", True):
             return False
 
-        skill_file = os.path.join(SKILLS_DIR, skill["filename"])
-        if not os.path.isfile(skill_file):
+        skill_file = self.skills_dir / skill["filename"]
+        if not skill_file.exists():
             logger.warning(f"Skill file not found: {skill_file}")
             return False
 
         try:
-            spec = importlib.util.spec_from_file_location(
-                f"skill_{skill['id']}", skill_file
-            )
+            # Important: unique module name per user and skill
+            module_name = f"user_{self.owner_id}_skill_{skill['id']}"
+            spec = importlib.util.spec_from_file_location(module_name, str(skill_file))
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
 
@@ -85,10 +92,10 @@ class SkillManager:
             self._loaded_tools[tool_name] = module.run
             skill["status"] = "loaded"
             skill["error"] = None
-            logger.info(f"✅ Loaded skill: {skill['name']} → tool '{tool_name}'")
+            logger.info(f"✅ Loaded skill for user {self.owner_id}: {skill['name']} → tool '{tool_name}'")
             return True
         except Exception as e:
-            logger.error(f"❌ Failed to load skill '{skill['name']}': {e}")
+            logger.error(f"❌ Failed to load skill '{skill['name']}' for user {self.owner_id}: {e}")
             skill["status"] = "error"
             skill["error"] = str(e)
             return False
@@ -99,7 +106,6 @@ class SkillManager:
         for skill in self._registry:
             self._load_skill(skill)
         self._rebuild_definitions()
-        self._inject_into_agent_tools()
 
     def _rebuild_definitions(self):
         """Rebuild the TOOL_DEFINITIONS string from loaded skills."""
@@ -113,23 +119,6 @@ class SkillManager:
         else:
             self._tool_definitions = ""
 
-    def _inject_into_agent_tools(self):
-        """Inject loaded skills into the agent's TOOLS registry."""
-        try:
-            from core.agent_tools import TOOLS
-            # Remove old custom skills (those starting with skill_ prefix or in registry)
-            registered_names = {s["tool_name"] for s in self._registry}
-            for name in list(TOOLS.keys()):
-                if name in registered_names:
-                    del TOOLS[name]
-
-            # Add currently loaded skills
-            for tool_name, func in self._loaded_tools.items():
-                TOOLS[tool_name] = func
-                logger.info(f"🔌 Injected skill tool: {tool_name}")
-        except Exception as e:
-            logger.error(f"Failed to inject skills: {e}")
-
     # ── Public API ────────────────────────────────────────────────
 
     def list_skills(self) -> List[Dict[str, Any]]:
@@ -140,11 +129,10 @@ class SkillManager:
         for s in self._registry:
             if s["id"] == skill_id:
                 # Also read the code from file
-                filepath = os.path.join(SKILLS_DIR, s["filename"])
+                filepath = self.skills_dir / s["filename"]
                 code = ""
-                if os.path.isfile(filepath):
-                    with open(filepath, "r", encoding="utf-8") as f:
-                        code = f.read()
+                if filepath.exists():
+                    code = filepath.read_text(encoding="utf-8")
                 return {**s, "code": code}
         return None
 
@@ -165,9 +153,8 @@ class SkillManager:
         filename = f"{tool_name}.py"
 
         # Write code file
-        filepath = os.path.join(SKILLS_DIR, filename)
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(code)
+        filepath = self.skills_dir / filename
+        filepath.write_text(code, encoding="utf-8")
 
         skill = {
             "id": skill_id,
@@ -189,7 +176,6 @@ class SkillManager:
         # Try loading
         self._load_skill(skill)
         self._rebuild_definitions()
-        self._inject_into_agent_tools()
         self._save_registry()
 
         return skill
@@ -221,19 +207,18 @@ class SkillManager:
         if tool_name is not None and tool_name != old_tool_name:
             tool_name = tool_name.strip().lower().replace(" ", "_")
             # Remove old file, write new
-            old_file = os.path.join(SKILLS_DIR, skill["filename"])
+            old_file = self.skills_dir / skill["filename"]
             new_filename = f"{tool_name}.py"
-            new_file = os.path.join(SKILLS_DIR, new_filename)
-            if os.path.isfile(old_file) and old_file != new_file:
-                os.rename(old_file, new_file)
+            new_file = self.skills_dir / new_filename
+            if old_file.exists() and old_file != new_file:
+                old_file.rename(new_file)
             skill["tool_name"] = tool_name
             skill["filename"] = new_filename
 
         # Update code
         if code is not None:
-            filepath = os.path.join(SKILLS_DIR, skill["filename"])
-            with open(filepath, "w", encoding="utf-8") as f:
-                f.write(code)
+            filepath = self.skills_dir / skill["filename"]
+            filepath.write_text(code, encoding="utf-8")
 
         skill["updated_at"] = datetime.now().isoformat()
         self._save_registry()
@@ -254,18 +239,10 @@ class SkillManager:
         if not skill:
             return False
 
-        # Remove from TOOLS
-        try:
-            from core.agent_tools import TOOLS
-            if skill["tool_name"] in TOOLS:
-                del TOOLS[skill["tool_name"]]
-        except Exception:
-            pass
-
         # Remove file
-        filepath = os.path.join(SKILLS_DIR, skill["filename"])
-        if os.path.isfile(filepath):
-            os.remove(filepath)
+        filepath = self.skills_dir / skill["filename"]
+        if filepath.exists():
+            filepath.unlink()
 
         # Remove from loaded
         self._loaded_tools.pop(skill["tool_name"], None)
@@ -286,7 +263,6 @@ class SkillManager:
 
         self._load_skill(skill)
         self._rebuild_definitions()
-        self._inject_into_agent_tools()
         self._save_registry()
         return skill
 

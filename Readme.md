@@ -106,12 +106,16 @@ Hệ thống sẽ chạy đồng thời:
 
 ## 📝 Nhật ký Phát triển (Changelog)
 
+- **[2026-04-04]** **Quản trị AI Động (Dynamic AI Management)**: Chuyển đổi toàn bộ cấu hình LLM (Gemini, OpenAI, Ollama) sang cơ sở dữ liệu. Quản lý tập trung qua Control Plane tại Admin.
+- **[2026-04-04]** **Cá nhân hóa Hồ sơ (User Personalization)**: Ra mắt trang Profile cho phép cập nhật tên hiển thị, mật khẩu và tính năng tải lên ảnh đại diện (Avatar).
+- **[2026-04-04]** Tinh lọc giao diện người dùng: Tối ưu hóa Sidebar, Header Chat gọn gàng hơn, loại bỏ các menu thừa trong không gian làm việc CODE.
+- **[2026-04-02]** Hoàn thiện HatAI Code Workstation: Giao diện IDE tích hợp AI, hỗ trợ quản lý file và thực thi lệnh trực tiếp.
 - **[2026-03-29]** Tích hợp tính năng **Background Task Runner** độc lập. Agent có thể tự động sinh tool `create_background_task` qua chat.
-- **[2026-03-29]** Hợp nhất tài liệu dự án vào `CLAUDE.md`, chuẩn hóa ngôn ngữ chuyên nghiệp (Vietnamese/English Hybrid). Cập nhật API `update_docs` để hướng về file này.
+- **[2026-03-29]** Hợp nhất tài liệu dự án vào `readme.md`, chuẩn hóa ngôn ngữ chuyên nghiệp (Vietnamese/English Hybrid).
 - **[2026-03-28]** Tối ưu hóa RAG Engine: Lazy loading cho Embedding model, sửa lỗi Unicode trong tên Topic, giảm noise logging cho Daemon.
 - **[2026-03-27]** Triển khai Autonomous Agent Loop v3: Hoạt động liên tục không giới hạn bước cho đến khi hoàn thành mục tiêu.
 - **[2026-03-26]** Ra mắt Giao diện Brain Page: Cho phép quản lý trực tiếp tâm hồn và ký ức của AI.
 - **[2026-03-25]** Khởi tạo nền tảng HatAI v3 với Unified Memory kiến trúc mới.
 
 ---
-*Tài liệu này được duy trì bởi HatAI Agent — Cập nhật lần cuối: 29/03/2026*
+*Tài liệu này được duy trì bởi HatAI Agent — Cập nhật lần cuối: 04/04/2026*

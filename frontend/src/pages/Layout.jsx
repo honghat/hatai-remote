@@ -5,7 +5,7 @@ import { useTheme } from '../context/ThemeContext'
 import api from '../api'
 import {
   Bot, Code2, LogOut, Menu, X, Zap, Brain,
-  Sun, Moon, ListTodo, Puzzle, Clock, Monitor,
+  Sun, Moon, ListTodo, Puzzle, Clock, Monitor, User,
   Users, Shield, LayoutDashboard, Settings, Activity,
   Building2, Calculator, ChevronDown, ChevronRight,
   FileText, BarChart3, KeyRound
@@ -35,15 +35,14 @@ const NAV_SECTIONS = [
     items: [
       { path: '/terminal', label: 'SSH Terminal', icon: Monitor, permission: ['terminal', 'read'] },
       { path: '/project', label: 'HatAI Code', icon: Code2, permission: ['code', 'read'] },
-      { path: '/skills', label: 'Agent Skills', icon: Puzzle, permission: ['skills', 'read'] },
     ],
   },
   {
     key: 'knowledge',
-    label: 'Tri thức',
+    label: 'Trí nhớ Agent',
     icon: Brain,
     items: [
-      { path: '/brain', label: 'Brain & Memory', icon: Brain, permission: ['brain', 'read'] },
+      { path: '/brain', label: 'Tổng quan', icon: Brain, permission: ['brain', 'read'] },
     ],
   },
   {
@@ -96,10 +95,14 @@ function RoleBadge({ user, isCollapsed }) {
   return (
     <div className="mx-3 p-3 rounded-xl bg-light-50/80 dark:bg-dark-800/50 border border-light-100 dark:border-slate-800/40 relative group">
       <div className="flex items-center gap-2.5">
-        <div className={`flex-shrink-0 w-9 h-9 rounded-lg bg-gradient-to-br ${gradient} flex items-center justify-center shadow-lg transition-transform group-hover:scale-105 duration-300`}>
-          <span className="text-white text-xs font-black uppercase">
-            {(user?.full_name || user?.username || '?')[0]}
-          </span>
+        <div className={`flex-shrink-0 w-9 h-9 rounded-lg bg-gradient-to-br ${gradient} flex items-center justify-center shadow-lg transition-transform group-hover:scale-105 duration-300 overflow-hidden`}>
+          {user?.avatar_url ? (
+            <img src={user.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+          ) : (
+            <span className="text-white text-xs font-black uppercase">
+              {(user?.full_name || user?.username || '?')[0]}
+            </span>
+          )}
         </div>
         <div className="min-w-0 flex-1">
           <p className={`text-sm font-bold truncate leading-tight ${roleName === 'admin' ? 'text-emerald-600 dark:text-emerald-400' : 'text-light-900 dark:text-white'}`}>
@@ -321,27 +324,35 @@ export default function Layout() {
           <RoleBadge user={user} isCollapsed={!sidebarOpen} />
           
           {/* Action Buttons right under profile if expanded, OR small icons if collapsed */}
-          <div className={`mt-2 px-3 flex ${sidebarOpen ? 'flex-row gap-2' : 'flex-col items-center gap-2'}`}>
+          <div className={`mt-2 px-3 flex gap-2 ${sidebarOpen ? 'flex-row' : 'flex-col items-center'}`}>
+            <Link
+                to="/profile"
+                className={`flex items-center justify-center gap-2 rounded-xl transition-all duration-300 text-light-500 dark:text-slate-500 hover:text-light-900 dark:hover:text-white hover:bg-light-100 dark:hover:bg-dark-800/50 ${sidebarOpen ? 'flex-1 px-3 py-2 border border-light-100 dark:border-slate-800/40 bg-white dark:bg-dark-900/50' : 'p-2.5 border border-light-100/50 dark:border-slate-800/30'}`}
+                title="Hồ sơ cá nhân"
+            >
+                <div className="flex-shrink-0 w-4 h-4 flex items-center justify-center">
+                    <User size={14} />
+                </div>
+            </Link>
+
             <button
                 onClick={toggleTheme}
-                className={`flex items-center gap-2 rounded-xl transition-all duration-300 text-light-500 dark:text-slate-500 hover:text-light-900 dark:hover:text-white hover:bg-light-100 dark:hover:bg-dark-800/50 ${sidebarOpen ? 'flex-1 px-3 py-1.5 border border-light-100 dark:border-slate-800/40 bg-white dark:bg-dark-900/50' : 'p-2.5 border border-light-100/50 dark:border-slate-800/30'}`}
+                className={`flex items-center justify-center gap-2 rounded-xl transition-all duration-300 text-light-500 dark:text-slate-500 hover:text-light-900 dark:hover:text-white hover:bg-light-100 dark:hover:bg-dark-800/50 ${sidebarOpen ? 'p-2 border border-light-100 dark:border-slate-800/40 bg-white dark:bg-dark-900/50' : 'p-2.5 border border-light-100/50 dark:border-slate-800/30'}`}
                 title={theme === 'dark' ? 'Chuyển sang chế độ sáng' : 'Chuyển sang chế độ tối'}
             >
                 <div className="flex-shrink-0 w-4 h-4 flex items-center justify-center">
                     {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
                 </div>
-                {sidebarOpen && <span className="text-[10px] font-black uppercase tracking-widest whitespace-nowrap">Giao diện</span>}
             </button>
 
             <button
                 onClick={handleLogout}
-                className={`flex items-center gap-2 rounded-xl transition-all duration-300 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/10 ${sidebarOpen ? 'flex-1 px-3 py-1.5 border border-red-500/10 bg-white dark:bg-dark-900/50' : 'p-2.5 border border-red-500/10'}`}
+                className={`flex items-center justify-center gap-2 rounded-xl transition-all duration-300 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/10 ${sidebarOpen ? 'flex-1 px-3 py-2 border border-red-500/10 bg-white dark:bg-dark-900/50' : 'p-2.5 border border-red-500/10'}`}
                 title="Đăng xuất"
             >
                 <div className="flex-shrink-0 w-4 h-4 flex items-center justify-center">
                     <LogOut size={14} />
                 </div>
-                {sidebarOpen && <span className="text-[10px] font-black uppercase tracking-widest whitespace-nowrap">Rời hệ thống</span>}
             </button>
           </div>
         </div>

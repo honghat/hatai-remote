@@ -13,6 +13,7 @@ import Skills from './pages/Skills'
 import Project from './pages/Project'
 import ERP from './pages/ERP'
 import Accounting from './pages/Accounting'
+import Profile from './pages/Profile'
 
 // Admin pages
 import AdminDashboard from './pages/admin/AdminDashboard'
@@ -46,6 +47,7 @@ function App() {
               <Route path="erp" element={<ERP />} />
               <Route path="accounting" element={<Accounting />} />
               <Route path="project" element={<Project />} />
+              <Route path="profile" element={<Profile />} />
 
               {/* Admin routes */}
               <Route path="admin" element={<AdminDashboard />} />

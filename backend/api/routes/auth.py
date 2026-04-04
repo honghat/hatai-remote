@@ -57,6 +57,7 @@ async def login(data: LoginRequest, db: Session = Depends(get_db)):
             "username": user.username,
             "email": user.email,
             "full_name": user.full_name,
+            "avatar_url": user.avatar_url,
             "role_id": user.role_id,
             "is_active": user.is_active,
             "created_at": str(user.created_at) if user.created_at else None,
@@ -103,9 +104,61 @@ async def me(user_id: int = Depends(get_current_user), db: Session = Depends(get
         "username": user.username,
         "email": user.email,
         "full_name": user.full_name,
+        "avatar_url": user.avatar_url,
         "role_id": user.role_id,
         "is_active": user.is_active,
         "created_at": user.created_at,
         "role": role_info,
         "permissions": permissions,
     }
+
+@router.put("/profile", tags=["Auth"])
+async def update_profile(
+    data: dict, 
+    user_id: int = Depends(get_current_user), 
+    db: Session = Depends(get_db)
+):
+    svc = UserService(db)
+    user = svc.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Restrict keys that can be updated via this endpoint
+    allowed_keys = {"email", "full_name", "password", "avatar_url"}
+    update_data = {k: v for k, v in data.items() if k in allowed_keys}
+    
+    updated_user = svc.update_user(user, update_data)
+    return {"message": "Profile updated", "user": {"id": updated_user.id, "full_name": updated_user.full_name, "avatar_url": updated_user.avatar_url}}
+
+from fastapi import UploadFile, File
+import os
+import shutil
+import uuid
+
+@router.post("/avatar", tags=["Auth"])
+async def upload_avatar(
+    file: UploadFile = File(...), 
+    user_id: int = Depends(get_current_user), 
+    db: Session = Depends(get_db)
+):
+    svc = UserService(db)
+    user = svc.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Create uploads/avatars directory
+    avatar_dir = os.path.join("uploads", "avatars")
+    os.makedirs(avatar_dir, exist_ok=True)
+
+    # Generate unique filename
+    ext = os.path.splitext(file.filename)[1]
+    filename = f"{uuid.uuid4()}{ext}"
+    file_path = os.path.join(avatar_dir, filename)
+
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    avatar_url = f"/uploads/avatars/{filename}"
+    svc.update_user(user, {"avatar_url": avatar_url})
+
+    return {"message": "Avatar uploaded", "avatar_url": avatar_url}

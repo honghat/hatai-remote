@@ -30,68 +30,79 @@ logger = logging.getLogger("MemoryManager")
 
 
 class MemoryManager:
-    _instance = None
+    _instances = {}
     _lock = threading.Lock()
 
     @classmethod
-    def get(cls) -> "MemoryManager":
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = cls()
-        return cls._instance
+    def get(cls, owner_id: int = 1) -> "MemoryManager":
+        """Get MemoryManager instance for a specific user ID. Default to 1 (system/default)."""
+        with cls._lock:
+            if owner_id not in cls._instances:
+                cls._instances[owner_id] = cls(owner_id)
+        return cls._instances[owner_id]
 
-    def __init__(self):
+    def __init__(self, owner_id: int):
+        self.owner_id = owner_id
         self.rag = RAGEngine.get()
         self._file_lock = threading.Lock()
+        
+        # User-specific data path
+        self.user_data_dir = DATA_DIR / "users" / str(owner_id)
+        self.user_data_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Paths for this specific user
+        self.preferences_path = self.user_data_dir / "preferences.json"
+        self.scratchpad_path = self.user_data_dir / "scratchpad.md"
+        self.soul_path = self.user_data_dir / "soul_memory.md"
+        self.episodes_dir = self.user_data_dir / "episodes"
+        self.episodes_dir.mkdir(exist_ok=True)
 
     # ── Soul ────────────────────────────────────────────────
 
     def get_soul(self) -> str:
         try:
-            return SOUL_PATH.read_text(encoding="utf-8")
+            return self.soul_path.read_text(encoding="utf-8")
         except FileNotFoundError:
+            # Fallback to global soul if user hasn't defined one? 
+            # Or just return empty. Let's return empty.
             return ""
 
     def update_soul(self, content: str):
         with self._file_lock:
-            SOUL_PATH.write_text(content, encoding="utf-8")
+            self.soul_path.write_text(content, encoding="utf-8")
 
     # ── Scratchpad ──────────────────────────────────────────
 
     def get_scratchpad(self) -> str:
         try:
-            return SCRATCHPAD_PATH.read_text(encoding="utf-8")
+            return self.scratchpad_path.read_text(encoding="utf-8")
         except FileNotFoundError:
             return ""
 
     def write_scratchpad(self, content: str, mode: str = "append"):
         with self._file_lock:
             if mode == "overwrite":
-                SCRATCHPAD_PATH.write_text(content, encoding="utf-8")
+                self.scratchpad_path.write_text(content, encoding="utf-8")
             else:
-                with open(SCRATCHPAD_PATH, "a", encoding="utf-8") as f:
+                with open(self.scratchpad_path, "a", encoding="utf-8") as f:
                     f.write(content + "\n")
 
     def clear_scratchpad(self):
         with self._file_lock:
-            SCRATCHPAD_PATH.write_text("", encoding="utf-8")
+            self.scratchpad_path.write_text("", encoding="utf-8")
 
     # ── RAG Knowledge ───────────────────────────────────────
 
     def add_knowledge(self, topic: str, content: str, source: str = "agent") -> Dict[str, Any]:
-        return self.rag.add_knowledge(topic, content, source)
+        return self.rag.add_knowledge(topic, content, source, user_id=self.owner_id)
 
     def query_knowledge(self, topic: str, query: str, n_results: int = 3) -> Dict[str, Any]:
-        return self.rag.query_knowledge(topic, query, n_results)
+        return self.rag.query_knowledge(topic, query, n_results, user_id=self.owner_id)
 
     def query_all_knowledge(self, query: str, n_results: int = 5) -> List[Dict[str, Any]]:
         """Query across all topics in parallel, return merged results sorted by relevance.
-
-        Returns top-N results across ALL topics, ranked by distance (lower = better).
-        Filters out weak matches (distance > 1.3) to avoid injecting noise.
         """
-        topics = [t for t in self.rag.list_topics() if not t.startswith("session_")]
+        topics = [t for t in self.rag.list_topics(user_id=self.owner_id) if not t.startswith("session_")]
         if not topics:
             return []
 
@@ -99,7 +110,7 @@ class MemoryManager:
 
         # ── Query all topics in parallel ──
         def _query_topic(topic):
-            return topic, self.rag.query_knowledge(topic, query, n_results=3, max_distance=1.3)
+            return topic, self.rag.query_knowledge(topic, query, n_results=3, max_distance=1.3, user_id=self.owner_id)
 
         with ThreadPoolExecutor(max_workers=min(len(topics), 8)) as pool:
             futures = [pool.submit(_query_topic, t) for t in topics]
@@ -134,10 +145,10 @@ class MemoryManager:
         return unique_results
 
     def list_topics(self) -> List[str]:
-        return self.rag.list_topics()
+        return self.rag.list_topics(user_id=self.owner_id)
 
     def delete_topic(self, topic: str) -> Dict[str, Any]:
-        return self.rag.delete_topic(topic)
+        return self.rag.delete_topic(topic, user_id=self.owner_id)
 
     # ── Episodes ────────────────────────────────────────────
 
@@ -151,7 +162,7 @@ class MemoryManager:
         """Save a conversation episode. Returns filename."""
         now = datetime.now()
         filename = now.strftime("%Y-%m-%d-%H%M") + ".md"
-        filepath = EPISODES_DIR / filename
+        filepath = self.episodes_dir / filename
 
         lines = [
             f"# Episode {now.strftime('%Y-%m-%d %H:%M')}",
@@ -189,7 +200,7 @@ class MemoryManager:
         """Get last N episodes sorted by date (newest first)."""
         episodes = []
         try:
-            files = sorted(EPISODES_DIR.glob("*.md"), reverse=True)[:n]
+            files = sorted(self.episodes_dir.glob("*.md"), reverse=True)[:n]
             for f in files:
                 content = f.read_text(encoding="utf-8")
                 # Extract summary (first paragraph after ## Summary)
@@ -217,7 +228,7 @@ class MemoryManager:
 
     def get_episode(self, filename: str) -> Optional[str]:
         """Read a specific episode file."""
-        filepath = EPISODES_DIR / filename
+        filepath = self.episodes_dir / filename
         if filepath.exists() and filepath.suffix == ".md":
             return filepath.read_text(encoding="utf-8")
         return None
@@ -227,7 +238,7 @@ class MemoryManager:
         results = []
         query_lower = query.lower()
         try:
-            for f in sorted(EPISODES_DIR.glob("*.md"), reverse=True):
+            for f in sorted(self.episodes_dir.glob("*.md"), reverse=True):
                 content = f.read_text(encoding="utf-8")
                 if query_lower in content.lower():
                     results.append({
@@ -243,7 +254,7 @@ class MemoryManager:
 
     def get_preferences(self) -> Dict[str, Any]:
         try:
-            return json.loads(PREFERENCES_PATH.read_text(encoding="utf-8"))
+            return json.loads(self.preferences_path.read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError):
             return {}
 
@@ -252,7 +263,7 @@ class MemoryManager:
             prefs = self.get_preferences()
             prefs[key] = value
             prefs["_updated_at"] = datetime.now().isoformat()
-            PREFERENCES_PATH.write_text(
+            self.preferences_path.write_text(
                 json.dumps(prefs, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
@@ -261,7 +272,7 @@ class MemoryManager:
         """Replace all preferences."""
         with self._file_lock:
             prefs["_updated_at"] = datetime.now().isoformat()
-            PREFERENCES_PATH.write_text(
+            self.preferences_path.write_text(
                 json.dumps(prefs, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
@@ -280,11 +291,15 @@ class MemoryManager:
         knowledge_details = []
         for topic in topics:
             try:
-                col = self.rag._get_collection(topic)
+                col = self.rag._get_collection(topic, user_id=self.owner_id)
                 count = col.count() if col else 0
                 knowledge_details.append({"topic": topic, "count": count})
             except Exception:
                 knowledge_details.append({"topic": topic, "count": 0})
+
+        # Fetch user skills
+        from core.skill_manager import SkillManager
+        skills = SkillManager.get(self.owner_id).list_skills()
 
         return {
             "soul": {"content": soul, "size": len(soul)},
@@ -293,6 +308,30 @@ class MemoryManager:
                 "size": len(scratchpad),
             },
             "knowledge": {"topics": knowledge_details, "total_topics": len(topics)},
-            "episodes": {"recent": episodes, "total": len(list(EPISODES_DIR.glob("*.md")))},
+            "episodes": {"recent": episodes, "total": len(list(self.episodes_dir.glob("*.md")))},
             "preferences": preferences,
+            "skills": {"list": skills, "total": len(skills)},
         }
+
+    def clear_all_memory(self):
+        """Wipe all learned memory for THIS user (RAG, Episodes, Scratchpad, Preferences). Keeps Soul."""
+        import shutil
+        
+        with self._file_lock:
+            # 1. Clear Scratchpad
+            self.clear_scratchpad()
+            
+            # 2. Delete all RAG topics for this user
+            topics = self.list_topics()
+            for t in topics:
+                self.delete_topic(t)
+            
+            # 3. Delete all Episodes for this user
+            if self.episodes_dir.exists():
+                shutil.rmtree(self.episodes_dir)
+                self.episodes_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 4. Reset Preferences
+            self.set_preferences({})
+            
+            logger.info(f"🗑️ ALL agent learned memory for user {self.owner_id} has been wiped.")

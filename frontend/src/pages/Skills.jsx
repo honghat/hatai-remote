@@ -699,7 +699,7 @@ export default function Skills() {
               <Puzzle size={24} className="text-primary-500" />
             </div>
             <div>
-              <h1 className="text-xl font-extrabold text-light-900 dark:text-white tracking-tight">Kỹ năng Agent</h1>
+              <h1 className="text-xl font-extrabold text-light-900 dark:text-white tracking-tight">Công cụ Trí nhớ Agent</h1>
               <p className="text-xs text-light-400 dark:text-slate-500 mt-0.5 font-bold uppercase tracking-widest">
                 Custom Python tools & Built-in sensors
               </p>

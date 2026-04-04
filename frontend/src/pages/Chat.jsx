@@ -1366,7 +1366,7 @@ export default function Chat() {
                   <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${daemon.connected ? 'bg-emerald-400' : 'bg-red-400'} opacity-75`}></span>
                   <span className={`relative inline-flex rounded-full h-2 w-2 ${daemon.connected ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
                 </span>
-                Smart Agent
+                Bích Lạc
               </p>
               <div title={daemon.connected ? 'Connected' : 'Offline'}
                 className={`p-1.5 rounded-lg border transition-all ${daemon.connected ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500' : 'bg-light-100 dark:bg-dark-900 border-light-200 dark:border-slate-800 text-light-400 dark:text-dark-400'}`}>
@@ -1579,7 +1579,6 @@ export default function Chat() {
 
                   <div className="hidden md:flex items-center gap-2.5 px-4 py-2 bg-emerald-500/5 border border-emerald-500/10 rounded-2xl">
                     <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    <p className="text-[10px] font-black text-emerald-500 uppercase tracking-widest leading-none">System Stable</p>
                   </div>
                 </div>
 

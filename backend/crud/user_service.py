@@ -38,3 +38,14 @@ class UserService:
         self.db.commit()
         self.db.refresh(user)
         return user
+
+    def update_user(self, user: User, data: dict) -> User:
+        for key, value in data.items():
+            if hasattr(user, key):
+                if key == "password":
+                    setattr(user, "password", self._hash(value))
+                else:
+                    setattr(user, key, value)
+        self.db.commit()
+        self.db.refresh(user)
+        return user

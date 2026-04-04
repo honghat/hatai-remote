@@ -4,10 +4,11 @@ Skills API — CRUD endpoints for managing Agent custom skills.
 import re
 import logging
 from typing import Optional, Dict, Any, List
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
 from core.skill_manager import SkillManager
+from core.security import get_current_user
 
 router = APIRouter(prefix="/skills", tags=["skills"])
 logger = logging.getLogger("SkillsAPI")
@@ -35,9 +36,9 @@ class SkillTest(BaseModel):
 
 
 @router.get("")
-def list_skills():
+def list_skills(user_id: int = Depends(get_current_user)):
     """List all registered skills."""
-    skills = SkillManager.get().list_skills()
+    skills = SkillManager.get(user_id).list_skills()
     return {"skills": skills, "total": len(skills)}
 
 
@@ -121,19 +122,19 @@ def list_builtin_tools():
 
 
 @router.get("/{skill_id}")
-def get_skill(skill_id: str):
+def get_skill(skill_id: str, user_id: int = Depends(get_current_user)):
     """Get a single skill with its code."""
-    skill = SkillManager.get().get_skill(skill_id)
+    skill = SkillManager.get(user_id).get_skill(skill_id)
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
     return skill
 
 
 @router.post("")
-def create_skill(body: SkillCreate):
+def create_skill(body: SkillCreate, user_id: int = Depends(get_current_user)):
     """Create a new skill."""
     try:
-        skill = SkillManager.get().create_skill(
+        skill = SkillManager.get(user_id).create_skill(
             name=body.name,
             description=body.description,
             tool_name=body.tool_name,
@@ -148,10 +149,10 @@ def create_skill(body: SkillCreate):
 
 
 @router.put("/{skill_id}")
-def update_skill(skill_id: str, body: SkillUpdate):
+def update_skill(skill_id: str, body: SkillUpdate, user_id: int = Depends(get_current_user)):
     """Update an existing skill."""
     try:
-        skill = SkillManager.get().update_skill(
+        skill = SkillManager.get(user_id).update_skill(
             skill_id=skill_id,
             name=body.name,
             description=body.description,
@@ -168,19 +169,19 @@ def update_skill(skill_id: str, body: SkillUpdate):
 
 
 @router.delete("/{skill_id}")
-def delete_skill(skill_id: str):
+def delete_skill(skill_id: str, user_id: int = Depends(get_current_user)):
     """Delete a skill."""
-    success = SkillManager.get().delete_skill(skill_id)
+    success = SkillManager.get(user_id).delete_skill(skill_id)
     if not success:
         raise HTTPException(status_code=404, detail="Skill not found")
     return {"message": "Skill deleted"}
 
 
 @router.post("/{skill_id}/reload")
-def reload_skill(skill_id: str):
+def reload_skill(skill_id: str, user_id: int = Depends(get_current_user)):
     """Reload a skill (re-import its Python code)."""
     try:
-        skill = SkillManager.get().reload_skill(skill_id)
+        skill = SkillManager.get(user_id).reload_skill(skill_id)
         return {"message": "Skill reloaded", "skill": skill}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -189,18 +190,18 @@ def reload_skill(skill_id: str):
 
 
 @router.post("/{skill_id}/test")
-def test_skill(skill_id: str, body: SkillTest):
+def test_skill(skill_id: str, body: SkillTest, user_id: int = Depends(get_current_user)):
     """Test a skill with sample args."""
-    result = SkillManager.get().test_skill(skill_id, body.args)
+    result = SkillManager.get(user_id).test_skill(skill_id, body.args)
     return result
 
 
 @router.post("/{skill_id}/toggle")
-def toggle_skill(skill_id: str):
+def toggle_skill(skill_id: str, user_id: int = Depends(get_current_user)):
     """Toggle a skill's enabled state."""
-    skill = SkillManager.get().get_skill(skill_id)
+    skill = SkillManager.get(user_id).get_skill(skill_id)
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
     new_enabled = not skill.get("enabled", True)
-    updated = SkillManager.get().update_skill(skill_id, enabled=new_enabled)
+    updated = SkillManager.get(user_id).update_skill(skill_id, enabled=new_enabled)
     return {"message": f"Skill {'enabled' if new_enabled else 'disabled'}", "skill": updated}

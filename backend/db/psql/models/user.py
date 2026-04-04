@@ -13,6 +13,7 @@ class User(Base):
     password = Column(String(255), nullable=False)
     email = Column(String(255), unique=True, index=True, nullable=True)
     full_name = Column(Unicode(255), nullable=True)
+    avatar_url = Column(String(500), nullable=True)
     role_id = Column(Integer, ForeignKey("roles.id"), default=None, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=lambda: datetime.datetime.now(datetime.UTC))

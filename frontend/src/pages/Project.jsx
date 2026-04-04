@@ -1472,23 +1472,7 @@ export default function Project() {
                             <Bot size={80} className="mb-8 text-primary-500 opacity-20 group-hover:opacity-40 transition-opacity" />
                             <div className="absolute inset-0 bg-primary-500/20 blur-[60px] rounded-full animate-pulse opacity-0 group-hover:opacity-100 transition-opacity" />
                         </div>
-                        <h3 className="text-xl font-black uppercase tracking-[0.4em] mb-4 opacity-60">HatAI Code Agent</h3>
-                        <p className="text-[12px] opacity-40 max-w-[280px] leading-relaxed font-bold mb-12">Chuyên gia lập trình tự động với quyền truy cập hệ thống toàn diện.</p>
-                        
-                        <div className="grid grid-cols-1 gap-3 w-full max-w-[320px]">
-                            {[
-                                { t: '🚀 Review dự án hiện tại', p: 'Review toàn bộ codebase và tìm lỗi tiềm ẩn' },
-                                { t: '📝 Tạo README chuyên nghiệp', p: 'Viết tài liệu hướng dẫn đầy đủ cho repository này' },
-                                { t: '🛠️ Fix lỗi UI / UX', p: 'Tìm và sửa các lỗi giao diện trong frontend' },
-                                { t: '📦 Push toàn bộ lên GitHub', p: 'Commit và đẩy mã nguồn lên cloud' }
-                            ].map(item => (
-                                <button key={item.t} onClick={() => setChatInput(item.t)} className={`group relative p-5 text-left rounded-3xl border transition-all duration-300 ${isDark ? 'bg-white/[0.02] border-white/5 hover:border-primary-500/40 hover:bg-primary-500/[0.05]' : 'bg-white border-black/[0.03] hover:border-primary-500/40 hover:shadow-xl'}`}>
-                                    <div className="text-[12px] font-black uppercase tracking-widest mb-1 group-hover:text-primary-500 transition-colors">{item.t}</div>
-                                    <div className="text-[10px] opacity-40 font-medium leading-relaxed">{item.p}</div>
-                                    <ArrowRight size={14} className="absolute right-5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 group-hover:translate-x-1 transition-all text-primary-500" />
-                                </button>
-                            ))}
-                        </div>
+                        <p className="text-[12px] opacity-40 max-w-[280px] leading-relaxed font-bold">Hãy nhập yêu cầu của bạn để bắt đầu lập trình.</p>
                     </div>
                 ) : (
                     chatMessages.map((msg, i) => (
