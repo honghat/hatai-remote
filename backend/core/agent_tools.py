@@ -139,7 +139,7 @@ BROWSER: browser_go{url} | open_browser{url} | browser_close_tab{which?,url?} | 
 DESKTOP: screenshot{} | sys_mouse{x,y,action?,amount?,drag_to_x?,drag_to_y?} | sys_type{text,app?,telex?} → telex=true for Vietnamese Telex IME | sys_key{key,modifiers?,app?} | sys_open_app{app_name} | sys_get_active_app{}
 AI_CODING: claude_code{action,prompt,cwd?,path?,instruction?,focus?,model?} → prompt|edit|review
 AI_CODING: antigravity{action,path?,code?,filename?,instruction?,ext_id?,command?,cwd?} → actions: open_file|open_folder|new_file(requires code)|diff|goto|run_terminal|ai_edit(instruction required)|ai_inline|list_extensions|install_extension|uninstall_extension
-MEMORY: scratchpad{action,content?} | remember{content,type,topic?} | query_knowledge{topic,query} | add_knowledge{topic,content} | session_query{query,n?} → Query temporary web/doc data for THIS session.
+MEMORY: scratchpad{action,content?} | remember{content,type,topic?} | query_knowledge{topic,query} | add_knowledge{topic,content} | session_query{query,n?} → Smart query: searches session data first, then global knowledge if session is empty. Use this for ANY knowledge lookup.
 SOCIAL: fb_message{contact,message}
 OTHER: web_search{query} | read_web{url} | get_current_time{} | excel_python{script} | create_background_task{prompt} | delete_all_tasks{}
 """ + OFFICE_TOOL_DEFINITIONS
@@ -2321,16 +2321,52 @@ def tool_query_knowledge(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def tool_session_query(args: Dict[str, Any]) -> Dict[str, Any]:
-    """Query temporary information (web results, document chunks) from THIS specific session."""
+    """Smart knowledge query: searches session-specific data first, falls back to global knowledge.
+    
+    This tool checks the current session's indexed data (from deep_search, read_web, etc.).
+    If the session has no data yet (new session), it automatically searches ALL knowledge topics
+    so the user always gets relevant results.
+    """
     from core.memory import MemoryManager
     query = args.get("query") or ""
     n = int(args.get("n") or 5)
     
     if not query:
         return {"error": "query is required"}
-        
+    
+    memory = MemoryManager.get()
     topic = _get_session_topic()
-    return MemoryManager.get().query_knowledge(topic, query, n_results=n)
+    
+    # 1. Try session-specific data first
+    session_result = memory.query_knowledge(topic, query, n_results=n)
+    
+    # If session has results, return them
+    if "results" in session_result and session_result["results"]:
+        session_result["source"] = "session"
+        return session_result
+    
+    # 2. Session is empty → fall back to global knowledge base
+    logger.info(f"🔄 Session '{topic}' empty, falling back to global knowledge for query: {query[:60]}")
+    global_results = memory.query_all_knowledge(query, n_results=n)
+    
+    if global_results:
+        formatted = [r["content"] for r in global_results]
+        distances = [r.get("distance", 0.0) for r in global_results]
+        topics_found = list(set(r.get("topic", "unknown") for r in global_results))
+        return {
+            "results": formatted,
+            "distances": distances,
+            "source": "global_knowledge",
+            "topics": topics_found,
+            "message": f"Phiên hiện tại chưa có dữ liệu. Đã tìm {len(formatted)} kết quả từ knowledge base toàn cục (topics: {', '.join(topics_found)})."
+        }
+    
+    # 3. Nothing found anywhere
+    return {
+        "message": f"Không tìm thấy dữ liệu nào cho query '{query}'. Hãy dùng deep_search để tìm kiếm thông tin trước.",
+        "source": "none",
+        "suggestion": "Use deep_search{query} to find and index information first, then session_query to retrieve it."
+    }
 
 
 def tool_clear_session_rag(args: Dict[str, Any]) -> Dict[str, Any]:

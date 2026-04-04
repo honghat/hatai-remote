@@ -262,11 +262,13 @@ IMPORTANT: Today is {now_str.split(' ')[0]}. If the user asks for "hôm nay", "m
 
 # Memory & Context (ON-DEMAND)
 - You have a persistent memory system. Use these tools to access it:
-  - `query_knowledge{{topic,query}}` — search RAG knowledge base by topic
-  - `session_query{{query,n?}}` — search data indexed during this session
+  - `session_query{{query,n?}}` — **PRIMARY tool for knowledge lookup**. Searches session data first, then falls back to global knowledge base automatically. Use this for ANY knowledge question.
+  - `query_knowledge{{topic,query}}` — search RAG knowledge base by specific topic (use when you know the exact topic)
   - `remember{{content,type,topic?}}` — save important findings for future use
+  - `deep_search{{query}}` — search the web and auto-index results into session memory for later `session_query` retrieval
 - ALWAYS query memory BEFORE answering complex questions or when the user references past conversations.
 - Do NOT assume you know something — if unsure, query first.
+- For research tasks: use `deep_search` first to gather data, then `session_query` to retrieve specific details.
 
 {TOOL_DEFINITIONS}
 {custom_skills}

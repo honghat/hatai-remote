@@ -12,7 +12,7 @@ import {
   Settings2, Brain, Sparkles, BrainCircuit,
   Zap, Terminal, FileText, FolderOpen, Camera,
   BookOpen, CheckCircle2, AlertCircle, Globe, ExternalLink, Square,
-  Wifi, WifiOff, Pause, Play
+  Wifi, WifiOff, Pause, Play, History
 } from 'lucide-react'
 
 // ── Parse events from formatted string ────────────────────────────────
@@ -391,40 +391,27 @@ const ToolStep = memo(function ToolStep({ step }) {
           </div>
 
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-3">
-              <span className={`text-[12px] font-black tracking-[0.1em] uppercase ${meta.color} opacity-80`}>
+            <div className="flex items-center gap-2">
+              <span className={`text-[10px] font-black tracking-[0.15em] uppercase ${meta.color} opacity-90`}>
                 {meta.label}
               </span>
-              <div className="h-1 w-1 rounded-full bg-slate-400/30" />
-              <span className="text-[10px] font-bold text-light-500 dark:text-slate-500 uppercase tracking-widest leading-none">
-                {hasResult ? 'Execution Complete' : 'Active Operation...'}
-              </span>
-            </div>
-            
-            <div className="flex items-center gap-3 mt-1.5 h-6">
-              {step.args?.command ? (
-                <div className="flex items-center gap-2 bg-black/20 dark:bg-slate-950/60 rounded-lg px-2.5 py-1 flex-1 max-w-md border border-white/5 group-hover/tool:border-white/10 transition-colors">
-                  <Terminal size={12} className="text-emerald-500/60" />
-                  <code className="text-[11px] text-emerald-400 font-mono truncate">$ {step.args.command}</code>
+              {(step.args?.path || step.args?.command || step.args?.query) && (
+                <div className="flex items-center gap-2 px-2 py-0.5 rounded bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 max-w-[70%]">
+                   <span className="text-[10px] font-mono opacity-40 truncate">
+                      {step.args.path || step.args.command || step.args.query}
+                   </span>
                 </div>
-              ) : step.args?.path ? (
-                <div className="flex items-center gap-2 bg-black/10 dark:bg-slate-900/40 rounded-lg px-2.5 py-1 flex-1 max-w-sm border border-white/5">
-                  <FolderOpen size={12} className="text-blue-500/60" />
-                  <code className="text-[11px] text-blue-400 font-mono truncate">{step.args.path}</code>
-                </div>
-              ) : step.args?.query ? (
-                <div className="flex items-center gap-2 text-[11px] font-bold text-orange-400 bg-orange-500/5 rounded-lg px-2.5 py-1 border border-orange-500/10">
-                  <Globe size={12} className="opacity-60" />
-                  <span className="truncate">{step.args.query}</span>
-                </div>
-              ) : (
-                <span className="text-[11px] text-light-400 dark:text-slate-600 italic">No secondary arguments</span>
               )}
             </div>
           </div>
 
-          <div className={`p-1.5 rounded-lg text-light-400 dark:text-slate-600 transition-all duration-300 ${expanded ? 'rotate-180 bg-white/5' : ''}`}>
-            <ChevronDown size={18} />
+          <div className="flex items-center gap-2">
+             <div className="hidden md:flex items-center gap-1.5 px-2 py-0.5 rounded bg-black/5 dark:bg-white/5 text-[8px] font-bold text-slate-400 uppercase tracking-widest leading-none">
+                {hasResult ? 'OK' : '...' }
+             </div>
+             <div className={`p-1 transition-all duration-300 ${expanded ? 'rotate-180 opacity-40' : 'opacity-20'}`}>
+               <ChevronDown size={14} />
+             </div>
           </div>
         </button>
 
@@ -508,24 +495,47 @@ const ToolStep = memo(function ToolStep({ step }) {
             {/* Search results (Premium Cards) */}
             {step.result?.results && (
               <div className="grid grid-cols-1 gap-3">
-                {step.result.results.map((r, i) => (
-                  <a key={i} href={r.url} target="_blank" rel="noopener noreferrer"
-                    className="group/res block bg-white/20 dark:bg-slate-900/60 p-4 rounded-2xl border border-white/5 hover:border-primary-500/40 hover:shadow-lg hover:shadow-primary-500/5 transition-all relative overflow-hidden"
-                  >
-                    <div className="absolute top-0 right-0 p-4 opacity-5 group-hover/res:opacity-10 transition-opacity">
-                       <Globe size={40} className="text-primary-500" />
+                {step.result.results.map((r, i) => {
+                  let hostname = 'Web'
+                  try { if(r.url) hostname = new URL(r.url).hostname.replace('www.', '') } catch { }
+                  
+                  return (
+                    <div key={i} className="group/res block bg-white/40 dark:bg-slate-900/40 p-5 rounded-[1.5rem] border border-light-200 dark:border-slate-800/40 hover:border-primary-500/40 hover:shadow-2xl hover:shadow-primary-500/10 transition-all relative overflow-hidden animate-slide-in" style={{ animationDelay: `${i * 0.1}s` }}>
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-xl bg-primary-500/10 flex items-center justify-center text-primary-600 dark:text-primary-400 shadow-inner">
+                            <Globe size={16} />
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-primary-500 font-black uppercase tracking-[0.2em]">{hostname}</p>
+                            <h4 className="text-[13px] text-light-900 dark:text-white font-bold line-clamp-1 group-hover/res:text-primary-500 transition-colors">{r.title}</h4>
+                          </div>
+                        </div>
+                        {r.url && (
+                          <a href={r.url} target="_blank" rel="noopener noreferrer" className="p-2.5 bg-light-100 hover:bg-primary-500 hover:text-white dark:bg-slate-800/60 dark:hover:bg-primary-600 rounded-xl transition-all shadow-sm">
+                            <ExternalLink size={14} />
+                          </a>
+                        )}
+                      </div>
+                      
+                      <p className="text-[12px] text-light-500 dark:text-slate-400 leading-relaxed line-clamp-2 opacity-80 mb-3">
+                        {r.snippet || r.content?.substring(0, 160) + '...'}
+                      </p>
+
+                      {r.content && (
+                         <details className="group/details border-t border-light-100 dark:border-slate-800/40 pt-3">
+                            <summary className="list-none cursor-pointer flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-light-400 dark:text-slate-500 hover:text-primary-500 transition-colors">
+                               <ChevronRight size={12} className="group-open/details:rotate-90 transition-transform" />
+                               View Extracted Intel
+                            </summary>
+                            <div className="mt-3 p-4 bg-light-50 dark:bg-black/20 rounded-2xl border border-light-100 dark:border-white/5 text-[11px] text-light-600 dark:text-slate-400 font-medium leading-relaxed max-h-48 overflow-y-auto custom-scrollbar italic whitespace-pre-wrap">
+                               {r.content}
+                            </div>
+                         </details>
+                      )}
                     </div>
-                    <div className="flex items-center gap-2 mb-2">
-                       <Globe size={14} className="text-primary-500" />
-                       <span className="text-[11px] text-primary-500/80 font-black uppercase tracking-widest">{new URL(r.url).hostname}</span>
-                    </div>
-                    <h4 className="text-sm text-light-900 dark:text-white font-bold mb-2 group-hover/res:text-primary-400 transition-colors line-clamp-1">{r.title}</h4>
-                    <p className="text-xs text-light-600 dark:text-slate-400 leading-relaxed line-clamp-2 opacity-80">{r.snippet}</p>
-                    <div className="flex items-center gap-1 mt-3 text-[10px] font-bold text-primary-500 opacity-0 group-hover/res:opacity-100 transition-all translate-y-2 group-hover/res:translate-y-0 text-right justify-end">
-                       READ FULL <ExternalLink size={10} />
-                    </div>
-                  </a>
-                ))}
+                  )
+                })}
               </div>
             )}
 
@@ -1169,8 +1179,21 @@ export default function Chat() {
 
       {/* Main Area */}
       <div className="flex-1 flex flex-col min-w-0 bg-white dark:bg-transparent">
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 md:px-8 py-5 border-b border-light-200 dark:border-slate-800/50 bg-white/80 dark:bg-dark-950/80 backdrop-blur-md sticky top-0 z-20">
+        {/* Mobile Header - Compact version */}
+        <div className="flex md:hidden items-center justify-between px-4 py-3 border-b border-light-200 dark:border-slate-800/40 bg-white/80 dark:bg-dark-950/80 backdrop-blur-md sticky top-0 z-20">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center shadow-lg shadow-primary-500/20">
+              <Bot size={16} className="text-white" />
+            </div>
+            <span className="text-[10px] font-black uppercase tracking-widest opacity-40">HatAI Chat</span>
+          </div>
+          <button onClick={handleNewChat} className="p-2 text-light-500" title="New Session">
+            <Plus size={20} />
+          </button>
+        </div>
+
+        {/* Desktop Header */}
+        <div className="hidden md:flex items-center justify-between px-4 md:px-8 py-5 border-b border-light-200 dark:border-slate-800/50 bg-white/80 dark:bg-dark-950/80 backdrop-blur-md sticky top-0 z-20">
           <div className="flex items-center gap-3 min-w-0">
             <button onClick={() => setChatSidebarOpen(true)} className="p-2 text-light-500 dark:text-slate-400 hover:bg-light-100 dark:hover:bg-dark-900 rounded-xl transition-all md:hidden">
               <Menu size={22} />
@@ -1318,8 +1341,8 @@ export default function Chat() {
                           className="w-full flex items-center gap-4 bg-white dark:bg-dark-900/40 hover:bg-light-100 dark:hover:bg-dark-800 border border-light-200 dark:border-slate-800/60 
                             rounded-[24px] px-7 py-5 text-sm font-bold text-light-800 dark:text-slate-200 transition-all duration-150 shadow-sm active:scale-[0.98] text-left group"
                         >
-                          <span className="text-2xl transition-transform group-hover:scale-125 duration-150">{prompt.match(/^([^\w\s]{1,3})/) ? prompt.match(/^([^\w\s]{1,3})/)[0] : '✨'}</span>
-                          <span className="truncate flex-1 opacity-70 group-hover:opacity-100 transition-opacity">
+                          <span className="text-2xl transition-transform group-hover:scale-125 duration-150 flex-shrink-0">{prompt.match(/^([^\w\s]{1,3})/) ? prompt.match(/^([^\w\s]{1,3})/)[0] : '✨'}</span>
+                          <span className="truncate flex-1 min-w-0 opacity-70 group-hover:opacity-100 transition-opacity">
                             {prompt.match(/^([^\w\s]{1,3})?\r?\n?\s*(.*)/)?.[2] || prompt}
                           </span>
                         </button>
@@ -1382,7 +1405,16 @@ export default function Chat() {
 
               <div className="flex items-center justify-between px-8 pb-6">
                 <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/5 dark:bg-emerald-500/10 border border-emerald-500/10 rounded-full">
+                  {/* Mobile History Toggle in Bottom Bar */}
+                  <button 
+                    onClick={() => setChatSidebarOpen(true)}
+                    className="flex md:hidden items-center gap-2 px-3 py-2 bg-primary-500/10 text-primary-600 dark:text-primary-500 rounded-xl border border-primary-500/10 active:scale-95 transition-all"
+                  >
+                    <History size={16} />
+                    <span className="text-[10px] font-black uppercase tracking-widest">History</span>
+                  </button>
+
+                  <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-emerald-500/5 dark:bg-emerald-500/10 border border-emerald-500/10 rounded-full">
                     <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                     <p className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest leading-none">System Stable</p>
                   </div>

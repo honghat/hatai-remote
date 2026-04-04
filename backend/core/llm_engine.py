@@ -16,11 +16,7 @@ import os
 from typing import Generator, List, Dict, Optional, Any
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-from core.config import (
-    MODEL_PATH, MODEL_N_GPU_LAYERS, MODEL_N_CTX,
-    GEMINI_API_KEY, GEMINI_MODEL, LLM_PROVIDER, OLLAMA_URL,
-    OPENAI_API_BASE, OPENAI_API_KEY, OPENAI_MODEL
-)
+import core.config as config
 
 logger = logging.getLogger("LLMEngine")
 
@@ -50,7 +46,7 @@ class LLMEngine:
     _openai_error: Optional[str] = None
 
     # Active provider
-    _provider: str = LLM_PROVIDER  # "local", "gemini", "ollama", or "openai"
+    _provider: str = config.LLM_PROVIDER  # "local", "gemini", "ollama", or "openai"
 
     @classmethod
     def get(cls) -> "LLMEngine":
@@ -68,14 +64,13 @@ class LLMEngine:
 
     def reload_provider_config(self):
         """Reload configuration from memory and re-initialize active clients."""
-        from core.config import GEMINI_API_KEY, OLLAMA_URL, OPENAI_API_BASE
-        if GEMINI_API_KEY:
+        if config.GEMINI_API_KEY:
             self._gemini_ready = False  # force reinit
             self._init_gemini()
-        if OLLAMA_URL:
+        if config.OLLAMA_URL:
             self._ollama_ready = False  # force reinit
             self._init_ollama()
-        if OPENAI_API_BASE:
+        if config.OPENAI_API_BASE:
             self._openai_ready = False
             self._init_openai()
 
@@ -118,11 +113,11 @@ class LLMEngine:
             from llama_cpp import Llama
             import multiprocessing
             n_threads = max(1, multiprocessing.cpu_count() // 2)
-            logger.info(f"⏳ Loading local model: {MODEL_PATH} (threads={n_threads})")
+            logger.info(f"⏳ Loading local model: {config.MODEL_PATH} (threads={n_threads})")
             self._llm = Llama(
-                model_path=MODEL_PATH,
-                n_gpu_layers=MODEL_N_GPU_LAYERS,
-                n_ctx=MODEL_N_CTX,
+                model_path=config.MODEL_PATH,
+                n_gpu_layers=config.MODEL_N_GPU_LAYERS,
+                n_ctx=config.MODEL_N_CTX,
                 n_threads=n_threads,
                 n_batch=256,
                 verbose=False,
@@ -136,28 +131,27 @@ class LLMEngine:
             self._local_loading = False
 
         # Also init Gemini if key is available
-        from core.config import GEMINI_API_KEY, OLLAMA_URL, OPENAI_API_BASE
-        if GEMINI_API_KEY:
+        if config.GEMINI_API_KEY:
             self._init_gemini()
-        if OLLAMA_URL:
+        if config.OLLAMA_URL:
             self._init_ollama()
-        if OPENAI_API_BASE:
+        if config.OPENAI_API_BASE:
             self._init_openai()
 
     def _init_gemini(self):
         """Initialize Gemini API client."""
         if self._gemini_ready:
             return
-        if not GEMINI_API_KEY:
+        if not config.GEMINI_API_KEY:
             self._gemini_error = "GEMINI_API_KEY not set in .env"
             logger.warning("⚠️ Gemini API key not configured")
             return
         try:
             from google import genai
 
-            self._gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+            self._gemini_client = genai.Client(api_key=config.GEMINI_API_KEY)
             self._gemini_ready = True
-            logger.info(f"✅ Gemini API ready (model: {GEMINI_MODEL})")
+            logger.info(f"✅ Gemini API ready (model: {config.GEMINI_MODEL})")
         except ImportError:
             self._gemini_error = "google-genai package not installed. Run: pip install google-genai"
             logger.error(f"❌ {self._gemini_error}")
@@ -169,25 +163,23 @@ class LLMEngine:
         """Initialize Ollama API client."""
         if self._ollama_ready:
             return
-        from core.config import OLLAMA_URL
-        if not OLLAMA_URL:
+        if not config.OLLAMA_URL:
             self._ollama_error = "OLLAMA_URL not set in .env"
             logger.warning("⚠️ Ollama URL not configured")
             return
         self._ollama_ready = True  # We assume it's ready, actual calls will verify
-        logger.info(f"✅ Ollama configuration loaded ({OLLAMA_URL})")
+        logger.info(f"✅ Ollama configuration loaded ({config.OLLAMA_URL})")
 
     def _init_openai(self):
         """Initialize OpenAI API compatible setup."""
         if self._openai_ready:
             return
-        from core.config import OPENAI_API_BASE
-        if not OPENAI_API_BASE:
+        if not config.OPENAI_API_BASE:
             self._openai_error = "OPENAI_API_BASE not set in .env"
             logger.warning("⚠️ OpenAI API Base not configured")
             return
         self._openai_ready = True
-        logger.info(f"✅ OpenAI API compatible configuration loaded ({OPENAI_API_BASE})")
+        logger.info(f"✅ OpenAI API compatible configuration loaded ({config.OPENAI_API_BASE})")
 
     # ── Status ──────────────────────────────────────────────────────────────
 
@@ -209,26 +201,27 @@ class LLMEngine:
                 "loaded": self._local_loaded,
                 "loading": self._local_loading,
                 "error": self._local_error,
-                "model_path": MODEL_PATH,
-                "n_gpu_layers": MODEL_N_GPU_LAYERS,
-                "n_ctx": MODEL_N_CTX,
+                "model_path": config.MODEL_PATH,
+                "n_gpu_layers": config.MODEL_N_GPU_LAYERS,
+                "n_ctx": config.MODEL_N_CTX,
             },
             "gemini": {
                 "ready": self._gemini_ready,
                 "error": self._gemini_error,
-                "model": GEMINI_MODEL,
-                "api_key_set": bool(GEMINI_API_KEY),
+                "model": config.GEMINI_MODEL,
+                "api_key_set": bool(config.GEMINI_API_KEY),
             },
             "ollama": {
                 "ready": self._ollama_ready,
                 "error": self._ollama_error,
-                "url": OLLAMA_URL,
+                "url": config.OLLAMA_URL,
+                "model": config.OLLAMA_MODEL,
             },
             "openai": {
                 "ready": self._openai_ready,
                 "error": self._openai_error,
-                "api_base": OPENAI_API_BASE,
-                "model": OPENAI_MODEL,
+                "api_base": config.OPENAI_API_BASE,
+                "model": config.OPENAI_MODEL,
             },
         }
 
@@ -391,7 +384,7 @@ class LLMEngine:
 
         try:
             response = self._gemini_client.models.generate_content_stream(
-                model=GEMINI_MODEL,
+                model=config.GEMINI_MODEL,
                 contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=system_instruction,
@@ -431,7 +424,7 @@ class LLMEngine:
 
         try:
             response = self._gemini_client.models.generate_content(
-                model=GEMINI_MODEL,
+                model=config.GEMINI_MODEL,
                 contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=system_instruction,
@@ -472,8 +465,6 @@ class LLMEngine:
         return ollama_msgs
 
     def _build_ollama_generate_payload(self, messages, max_tokens, temperature, stream=True):
-        from core.config import OLLAMA_MODEL, MODEL_N_CTX
-        
         ollama_messages = self._convert_messages_for_ollama(messages)
         
         prompt = ""
@@ -497,14 +488,14 @@ class LLMEngine:
         prompt += "ASSISTANT: "
         
         payload = {
-            "model": OLLAMA_MODEL,
+            "model": config.OLLAMA_MODEL,
             "prompt": prompt,
             "stream": stream,
             "raw": True, # Ignore the model's internal confusing templates, just execute
             "options": {
                 "temperature": temperature,
                 "num_predict": max_tokens,
-                "num_ctx": max(8192, MODEL_N_CTX)
+                "num_ctx": max(8192, config.MODEL_N_CTX)
             }
         }
         
@@ -517,12 +508,11 @@ class LLMEngine:
 
     def _ollama_stream(self, messages, max_tokens, temperature):
         import requests
-        from core.config import OLLAMA_URL
         
         payload = self._build_ollama_generate_payload(messages, max_tokens, temperature, stream=True)
         
         try:
-            with requests.post(f"{OLLAMA_URL.rstrip('/')}/api/generate", json=payload, stream=True, timeout=(10, 300)) as resp:
+            with requests.post(f"{config.OLLAMA_URL.rstrip('/')}/api/generate", json=payload, stream=True, timeout=(10, 300)) as resp:
                 resp.raise_for_status()
                 for line in resp.iter_lines():
                     if line:
@@ -543,12 +533,11 @@ class LLMEngine:
 
     def _ollama_sync(self, messages, max_tokens, temperature):
         import requests
-        from core.config import OLLAMA_URL
         
         payload = self._build_ollama_generate_payload(messages, max_tokens, temperature, stream=False)
         
         try:
-            resp = requests.post(f"{OLLAMA_URL.rstrip('/')}/api/generate", json=payload, timeout=(10, 300))
+            resp = requests.post(f"{config.OLLAMA_URL.rstrip('/')}/api/generate", json=payload, timeout=(10, 300))
             resp.raise_for_status()
             data = resp.json()
             return data.get("response", "[Empty response from Ollama]")
@@ -587,19 +576,18 @@ class LLMEngine:
 
     def _openai_stream(self, messages, max_tokens, temperature):
         import requests
-        from core.config import OPENAI_API_BASE, OPENAI_API_KEY, OPENAI_MODEL, MODEL_N_CTX
 
         headers = {
             "Content-Type": "application/json",
             "Accept": "text/event-stream",
-            "Authorization": f"Bearer {OPENAI_API_KEY}"
+            "Authorization": f"Bearer {config.OPENAI_API_KEY}"
         }
 
         # Ensure content is compatible and fits in context
         openai_messages = self._convert_messages_for_openai(messages)
 
         payload = {
-            "model": OPENAI_MODEL,
+            "model": config.OPENAI_MODEL,
             "messages": openai_messages,
             "stream": True,
             "max_tokens": max_tokens,
@@ -610,12 +598,12 @@ class LLMEngine:
 
         self._context_overflow = False
         try:
-            with requests.post(f"{OPENAI_API_BASE.rstrip('/')}/chat/completions", headers=headers, json=payload, stream=True, timeout=(10, 300)) as resp:
+            with requests.post(f"{config.OPENAI_API_BASE.rstrip('/')}/chat/completions", headers=headers, json=payload, stream=True, timeout=(10, 300)) as resp:
                 if resp.status_code >= 400:
                     # ... (rest of error handling left untouched)
                     return
                 
-                logger.info(f"📡 OpenAI ({OPENAI_MODEL}) stream started...")
+                logger.info(f"📡 OpenAI ({config.OPENAI_MODEL}) stream started...")
                 token_count = 0
                 for line in resp.iter_lines():
                     if line:
@@ -658,17 +646,16 @@ class LLMEngine:
 
     def _openai_sync(self, messages, max_tokens, temperature):
         import requests
-        from core.config import OPENAI_API_BASE, OPENAI_API_KEY, OPENAI_MODEL
 
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {OPENAI_API_KEY}"
+            "Authorization": f"Bearer {config.OPENAI_API_KEY}"
         }
 
         openai_messages = self._convert_messages_for_openai(messages)
 
         payload = {
-            "model": OPENAI_MODEL,
+            "model": config.OPENAI_MODEL,
             "messages": openai_messages,
             "stream": False,
             "max_tokens": max_tokens,
@@ -676,7 +663,7 @@ class LLMEngine:
         }
 
         try:
-            resp = requests.post(f"{OPENAI_API_BASE.rstrip('/')}/chat/completions", headers=headers, json=payload, timeout=(10, 300))
+            resp = requests.post(f"{config.OPENAI_API_BASE.rstrip('/')}/chat/completions", headers=headers, json=payload, timeout=(10, 300))
             if resp.status_code == 400:
                 err_json = resp.json()
                 return f"[ERROR] OpenAI API 400: {err_json.get('error', {}).get('message', 'Bad Request')}"

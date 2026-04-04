@@ -42,7 +42,7 @@ export default function Project() {
   const navigate = useNavigate()
   const location = useLocation()
 
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth > 768)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [files, setFiles] = useState([])
@@ -65,6 +65,9 @@ export default function Project() {
   const [gitLoading, setGitLoading] = useState(false)
   const [saving, setSaving] = useState({})
   const [showCheatSheet, setShowCheatSheet] = useState(false) // Toggle for Git commands
+  const [mobileExplorerOpen, setMobileExplorerOpen] = useState(window.innerWidth < 768 ? false : false)
+  const [mobileChatOpen, setMobileChatOpen] = useState(false)
+  const [showDiagnostics, setShowDiagnostics] = useState(window.innerWidth > 768)
   const [aiInstructions, setAiInstructions] = useState({})
   const [editingWithAi, setEditingWithAi] = useState({})
   const [pendingChanges, setPendingChanges] = useState({}) 
@@ -634,7 +637,14 @@ export default function Project() {
     const sorted = Object.values(node.children).sort((a,b) => (a.type !== b.type ? (a.type === 'folder' ? -1 : 1) : a.name.localeCompare(b.name)))
     return sorted.map(child => (
         <div key={child.path}>
-            <div onClick={() => child.type === 'folder' ? setOpenFolders(prev => { const n = new Set(prev); if (n.has(child.path)) n.delete(child.path); else n.add(child.path); return n; }) : handleOpenFile(child.path)} className={`flex items-center gap-1.5 px-3 py-0.5 cursor-pointer text-[12px] transition-colors ${activeTab === child.path ? (isDark ? 'bg-primary-500/20 text-white font-bold' : 'bg-primary-600/10 text-primary-600 font-bold') : (isDark ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-900')}`} style={{ paddingLeft: `${depth * 12 + 12}px` }}>
+            <div onClick={() => {
+                 if (child.type === 'folder') {
+                     setOpenFolders(prev => { const n = new Set(prev); if (n.has(child.path)) n.delete(child.path); else n.add(child.path); return n; })
+                 } else {
+                     handleOpenFile(child.path);
+                     if (window.innerWidth < 768) setMobileExplorerOpen(false);
+                 }
+            }} className={`flex items-center gap-1.5 px-3 py-0.5 cursor-pointer text-[12px] transition-colors ${activeTab === child.path ? (isDark ? 'bg-primary-500/20 text-white font-bold' : 'bg-primary-600/10 text-primary-600 font-bold') : (isDark ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-900')}`} style={{ paddingLeft: `${depth * 12 + 12}px` }}>
                 {child.type === 'folder' ? <ChevronRight size={12} className={openFolders.has(child.path) ? 'rotate-90' : ''} /> : <span className="w-3" />}
                 <span className="truncate">{child.name}</span>
             </div>
@@ -645,109 +655,151 @@ export default function Project() {
 
   return (
     <div className={`flex h-screen overflow-hidden font-sans transition-colors duration-300 ${isDark ? 'bg-[#0a0a0c] text-white' : 'bg-light-50 text-light-900'}`}>
-      
-      {/* Sidebar - App Navigation */}
-      <aside className={`flex flex-col bg-white dark:bg-dark-900/90 border-r border-light-200 dark:border-slate-800/60 transition-all duration-300 ease-in-out relative z-100 ${sidebarOpen ? 'w-60' : 'w-16'}`}>
-        <div className="flex items-center gap-3 px-5 py-6 border-b border-light-200 dark:border-slate-800/60">
-          <div className="flex-shrink-0 w-9 h-9 bg-primary-600 rounded-xl flex items-center justify-center shadow-lg"><Bot size={20} className="text-white" /></div>
-          {sidebarOpen && <div className="min-w-0"><p className="font-extrabold text-base tracking-tight leading-none">HatAI</p><p className="text-[10px] font-bold text-primary-600 mt-1 uppercase tracking-widest">Remote</p></div>}
-          <button onClick={() => setSidebarOpen(!sidebarOpen)} className="ml-auto p-1.5 text-light-400 dark:text-slate-500 hover:text-light-900 dark:hover:text-white hover:bg-light-100 dark:hover:bg-dark-800 rounded-lg">{sidebarOpen ? <X size={16}/> : <Menu size={16}/>}</button>
-        </div>
-        <div className="px-3 pt-3"><ModelStatusBadge isCollapsed={!sidebarOpen} /></div>
-        <nav className="flex-1 px-3 py-4 space-y-1.5 overflow-y-auto custom-scrollbar">
-          {NAV_ITEMS.map(({ path, label, icon: Icon }) => (
-            <Link key={path} to={path} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all font-bold text-sm ${location.pathname.startsWith(path) ? 'bg-primary-600 text-white shadow-lg' : 'text-light-500 dark:text-slate-500 hover:text-light-900 dark:hover:text-white hover:bg-light-100 dark:hover:bg-dark-800/50'}`}>
-              <Icon size={20} className="flex-shrink-0" />
-              {sidebarOpen && <span className="truncate">{label}</span>}
-            </Link>
-          ))}
-        </nav>
-        <div className="border-t border-light-200 dark:border-slate-800/60 p-4 space-y-2">
-          {sidebarOpen && user && <div className="px-3 py-1 mb-2"><p className="text-sm font-bold truncate">{user.username}</p></div>}
-          <div className="space-y-1">
-            <button onClick={toggleTheme} className="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-sm font-bold text-light-500 hover:bg-light-100 dark:hover:bg-dark-800/50 transition-all">
-                {isDark ? <Sun size={18} /> : <Moon size={18} />}
-                {sidebarOpen && <span>{isDark ? 'Chế độ sáng' : 'Chế độ tối'}</span>}
-            </button>
-            <button onClick={() => { logout(); navigate('/login'); }} className="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-sm font-bold text-red-600 hover:bg-red-50 transition-all">
-                <LogOut size={18} />
-                {sidebarOpen && <span>Đăng xuất</span>}
-            </button>
-          </div>
-        </div>
-      </aside>
-
-      {/* IDE CORE - ABSOLUTELY INDEPENDENT */}
-      <div className="flex-1 flex overflow-hidden">
-        
-        {/* Activity Bar - NOW INSIDE THE WORKSPACE */}
-        <div className={`w-14 flex flex-col items-center py-6 border-r transition-colors z-50 ${isDark ? 'bg-[#0a0a0c] border-white/5' : 'bg-white border-black/[0.05]'}`}>
-            <div onClick={() => setActiveSidebarView('explorer')} className={`p-3 cursor-pointer rounded-xl mb-4 transition-all ${activeSidebarView === 'explorer' ? 'bg-primary-600 text-white shadow-lg shadow-primary-900/30' : 'text-slate-500 hover:bg-slate-500/10'}`} title="Explorer"><FileCode size={20} /></div>
-            <div onClick={() => setActiveSidebarView('search')} className={`p-3 cursor-pointer rounded-xl mb-4 transition-all ${activeSidebarView === 'search' ? 'bg-primary-600 text-white shadow-lg shadow-primary-900/30' : 'text-slate-500 hover:bg-slate-500/10'}`} title="Search"><Search size={20} /></div>
-            <div onClick={() => setActiveSidebarView('history')} className={`p-3 cursor-pointer rounded-xl mb-4 transition-all ${activeSidebarView === 'history' ? 'bg-primary-600 text-white shadow-lg shadow-primary-900/30' : 'text-slate-500 hover:bg-slate-500/10'}`} title="Collaboration History"><History size={20} /></div>
-            <div onClick={() => setActiveSidebarView('git')} className={`p-3 cursor-pointer rounded-xl transition-all ${activeSidebarView === 'git' ? 'bg-primary-600 text-white shadow-lg shadow-primary-900/30' : 'text-slate-500 hover:bg-slate-500/10'}`} title="Source Control"><GitBranch size={20} /></div>
-        </div>
-
-        {/* Sidebar View Area */}
-        <div className={`w-72 flex flex-col border-r transition-colors duration-300 ${isDark ? 'bg-[#0f0f12] border-white/5 shadow-2xl shadow-black/40' : 'bg-[#f0ede1] border-black/[0.05]'}`}>
-            {activeSidebarView === 'explorer' ? (
-                <>
-                    <div className="p-6 pb-2 flex items-center justify-between"><span className="text-[10px] font-black uppercase tracking-[0.3em] opacity-30">Explorer</span><div className="flex gap-2"><button onClick={fetchFiles} className="opacity-30 hover:opacity-100"><RotateCcw size={14}/></button></div></div>
-                    <div className="px-5 py-2"><input className={`w-full bg-black/5 dark:bg-white/5 border-none rounded-lg px-3 py-2 text-[12px] outline-none placeholder:opacity-20`} placeholder="Filter files..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} /></div>
-                    <div className="flex-1 overflow-auto py-2 group custom-scrollbar">{renderTree(fileTree)}</div>
-                </>
-            ) : activeSidebarView === 'search' ? (
-                <>
-                    <div className="p-6 pb-2 text-[10px] font-black uppercase tracking-[0.3em] opacity-30">Global Search</div>
-                    <div className="px-5 py-2"><div className="relative"><Search className="absolute left-3 top-2.5 opacity-20" size={14} /><input className={`w-full bg-black/5 dark:bg-white/5 border-none rounded-lg pl-10 pr-3 py-2.5 text-[12px] outline-none placeholder:opacity-40`} placeholder="Find in files..." value={contentSearch} onChange={(e) => setContentSearch(e.target.value)} /></div></div>
-                    <div className="flex-1 overflow-auto py-4 px-5 space-y-4 custom-scrollbar">
-                        {contentResults.length > 0 ? contentResults.map(f => (
-                            <div key={f.path} onClick={() => handleOpenFile(f.path)} className={`p-4 rounded-2xl border cursor-pointer transition-all ${isDark ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-white/60 border-black/5 hover:bg-white'}`}><p className="text-[12px] font-black text-primary-500 mb-2 truncate">{f.name}</p><p className="text-[10px] opacity-40 mb-3 truncate">{f.path}</p><div className="text-[11px] opacity-60 font-mono line-clamp-2 italic">...{f.content?.substring(f.content.toLowerCase().indexOf(contentSearch.toLowerCase()), f.content.toLowerCase().indexOf(contentSearch.toLowerCase()) + 100)}...</div></div>
-                        )) : contentSearch.length > 2 && <p className="text-center opacity-20 text-[12px] mt-10">No results found</p>}
-                    </div>
-                </>
-            ) : activeSidebarView === 'history' ? (
-                <>
-                    <div className="p-6 pb-2 flex items-center justify-between">
-                        <span className="text-[10px] font-black uppercase tracking-[0.3em] opacity-30">Archive</span>
-                        <div className="flex gap-2">
-                             <button onClick={handleNewChat} className="p-1 px-3 bg-primary-500/10 text-primary-500 rounded-full text-[8px] font-black uppercase tracking-widest hover:bg-primary-500 hover:text-white transition-all">+ New Chat</button>
-                             <button onClick={fetchSessions} className="opacity-30 hover:opacity-100"><RotateCcw size={14}/></button>
+          
+          {/* Main App Navigation - Hidden on mobile, Drawer style */}
+          {sidebarOpen && (
+            <div className="fixed inset-0 bg-black/60 z-[110] md:hidden backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />
+          )}
+          <aside className={`flex flex-col bg-white dark:bg-dark-900 border-r border-light-200 dark:border-slate-800/60 transition-all duration-300 ease-in-out fixed md:relative z-[120] h-full ${sidebarOpen ? 'w-60 translate-x-0' : 'w-16 -translate-x-full md:translate-x-0 md:w-16'}`}>
+            <div className="flex items-center gap-3 px-5 py-6 border-b border-light-200 dark:border-slate-800/60">
+              <div className="flex-shrink-0 w-9 h-9 bg-primary-600 rounded-xl flex items-center justify-center shadow-lg"><Bot size={20} className="text-white" /></div>
+              {sidebarOpen && <div className="min-w-0 flex-1"><p className="font-extrabold text-base tracking-tight leading-none truncate">HatAI</p><p className="text-[10px] font-bold text-primary-600 mt-1 uppercase tracking-widest truncate">Remote</p></div>}
+              <button onClick={() => setSidebarOpen(!sidebarOpen)} className="ml-auto p-1.5 text-light-400 dark:text-slate-500 hover:text-light-900 dark:hover:text-white hover:bg-light-100 dark:hover:bg-dark-800 rounded-lg">{sidebarOpen ? <X size={16}/> : <Menu size={16}/>}</button>
+            </div>
+            <div className="px-3 pt-3"><ModelStatusBadge isCollapsed={!sidebarOpen} /></div>
+            <nav className="flex-1 px-3 py-4 space-y-1.5 overflow-y-auto custom-scrollbar">
+              {NAV_ITEMS.map(({ path, label, icon: Icon }) => (
+                <Link key={path} to={path} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all font-bold text-sm ${location.pathname.startsWith(path) ? 'bg-primary-600 text-white shadow-lg' : 'text-light-500 dark:text-slate-500 hover:text-light-900 dark:hover:text-white hover:bg-light-100 dark:hover:bg-dark-800/50'}`}>
+                  <Icon size={20} className="flex-shrink-0" />
+                  {sidebarOpen && <span className="truncate">{label}</span>}
+                </Link>
+              ))}
+            </nav>
+            <div className="border-t border-light-200 dark:border-slate-800/60 p-4 space-y-2">
+              {sidebarOpen && user && <div className="px-3 py-1 mb-2"><p className="text-sm font-bold truncate">{user.username}</p></div>}
+              <div className="space-y-1">
+                <button onClick={toggleTheme} className="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-sm font-bold text-light-500 hover:bg-light-100 dark:hover:bg-dark-800/50 transition-all">
+                    {isDark ? <Sun size={18} /> : <Moon size={18} />}
+                    {sidebarOpen && <span>{isDark ? 'Chế độ sáng' : 'Chế độ tối'}</span>}
+                </button>
+                <button onClick={() => { logout(); navigate('/login'); }} className="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-sm font-bold text-red-600 hover:bg-red-50 transition-all">
+                    <LogOut size={18} />
+                    {sidebarOpen && <span>Đăng xuất</span>}
+                </button>
+              </div>
+            </div>
+          </aside>
+    
+          {/* IDE CORE - ABSOLUTELY INDEPENDENT */}
+          <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+            
+            {/* IDE Header - MOBILE ONLY */}
+            <div className="flex md:hidden flex-col bg-white dark:bg-dark-900 border-b border-light-200 dark:border-slate-800/60 z-50">
+                <div className="flex items-center justify-between px-4 py-2.5">
+                    <div className="flex items-center gap-3">
+                        <button onClick={() => setSidebarOpen(true)} className="p-2 text-light-500 hover:text-primary-600 transition-colors"><Menu size={20} /></button>
+                        <div className="flex items-center gap-2 px-2 py-1 rounded-lg bg-primary-500/5 border border-primary-500/10">
+                            <Code2 size={16} className="text-primary-500" />
+                            <span className="text-[11px] font-black uppercase tracking-[0.2em] text-primary-600 dark:text-primary-400">Code Hub</span>
                         </div>
                     </div>
-                    <div className="flex-1 overflow-auto py-2 px-5 space-y-3 custom-scrollbar">
-                        {sessions.map(s => (
-                            <div key={s.id} onClick={() => handleLoadSession(s.id)} className={`relative p-5 rounded-3xl border cursor-pointer transition-all duration-500 group/session overflow-hidden ${activeSessionId == s.id ? (isDark ? 'bg-primary-500/[0.08] border-primary-500/30 shadow-2xl shadow-primary-900/20' : 'bg-primary-500/5 border-primary-500/20 shadow-xl shadow-primary-500/10') : (isDark ? 'bg-white/[0.02] border-white/5 hover:bg-white/[0.05] hover:border-white/10' : 'bg-white/40 border-black/[0.03] hover:bg-white hover:border-black/5')}`}>
-                                {activeSessionId == s.id && <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-primary-500 rounded-r-full shadow-[0_0_15px_rgba(99,102,241,0.8)]" />}
-                                <div className="flex flex-col gap-3">
-                                    <div className="flex items-center justify-between">
-                                        <p className={`text-[13px] font-black leading-tight truncate group-hover/session:text-primary-500 transition-colors flex-1 ${activeSessionId == s.id ? 'text-primary-500' : (isDark ? 'text-slate-300' : 'text-slate-900')}`}>{s.title || 'Collaborative Node'}</p>
-                                        <button onClick={(e) => handleDeleteSession(e, s.id)} className="opacity-0 group-hover/session:opacity-100 p-2 text-red-500/50 hover:text-red-500 transition-all hover:scale-110"><Trash2 size={12} /></button>
-                                    </div>
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-2 opacity-30 text-[9px] font-bold uppercase tracking-widest group-hover/session:opacity-60 transition-opacity">
-                                            <MessageSquare size={12} /> {s.message_count || 0} Events
+                    <button onClick={() => setShowChat(!showChat)} className={`p-2 rounded-xl transition-all ${showChat ? 'bg-amber-500 text-white shadow-lg' : 'text-light-400 dark:text-slate-500 hover:bg-light-100 dark:hover:bg-dark-800'}`}>
+                        <Sparkles size={20} />
+                    </button>
+                </div>
+
+                {/* Tab Switcher for Sidebar Views - MOBILE ONLY */}
+                <div className="flex px-4 py-1.5 gap-2 border-t border-light-100 dark:border-slate-800/20 overflow-x-auto no-scrollbar bg-white/50 dark:bg-black/10">
+                    {[
+                        { id: 'explorer', icon: FileCode, label: 'Files' },
+                        { id: 'search', icon: Search, label: 'Search' },
+                        { id: 'history', icon: History, label: 'History' },
+                        { id: 'git', icon: GitBranch, label: 'Source' }
+                    ].map(v => (
+                        <button 
+                            key={v.id} 
+                            onClick={() => { setActiveSidebarView(v.id); setMobileExplorerOpen(true); }}
+                            className={`flex items-center gap-2 whitespace-nowrap px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeSidebarView === v.id ? 'bg-primary-600 text-white shadow-lg' : 'text-light-400 dark:text-slate-500 hover:bg-black/5'}`}
+                        >
+                            <v.icon size={12} />
+                            <span>{v.label}</span>
+                        </button>
+                    ))}
+                </div>
+            </div>
+            
+            {/* Activity Bar - DESKTOP ONLY */}
+            <div className={`hidden md:flex w-14 flex-col items-center py-6 border-r transition-colors z-50 ${isDark ? 'bg-[#0a0a0c] border-white/5' : 'bg-white border-black/[0.05]'}`}>
+                <div onClick={() => { setActiveSidebarView('explorer'); setMobileExplorerOpen(true); }} className={`p-3 cursor-pointer rounded-xl mb-4 transition-all ${activeSidebarView === 'explorer' ? 'bg-primary-600 text-white shadow-lg shadow-primary-900/30' : 'text-slate-500 hover:bg-slate-500/10'}`} title="Explorer"><FileCode size={20} /></div>
+                <div onClick={() => { setActiveSidebarView('search'); setMobileExplorerOpen(true); }} className={`p-3 cursor-pointer rounded-xl mb-4 transition-all ${activeSidebarView === 'search' ? 'bg-primary-600 text-white shadow-lg shadow-primary-900/30' : 'text-slate-500 hover:bg-slate-500/10'}`} title="Search"><Search size={20} /></div>
+                <div onClick={() => { setActiveSidebarView('history'); setMobileExplorerOpen(true); }} className={`p-3 cursor-pointer rounded-xl mb-4 transition-all ${activeSidebarView === 'history' ? 'bg-primary-600 text-white shadow-lg shadow-primary-900/30' : 'text-slate-500 hover:bg-slate-500/10'}`} title="Collaboration History"><History size={20} /></div>
+                <div onClick={() => { setActiveSidebarView('git'); setMobileExplorerOpen(true); }} className={`p-3 cursor-pointer rounded-xl transition-all ${activeSidebarView === 'git' ? 'bg-primary-600 text-white shadow-lg shadow-primary-900/30' : 'text-slate-500 hover:bg-slate-500/10'}`} title="Source Control"><GitBranch size={20} /></div>
+            </div>
+    
+            {/* Sidebar View Area - Mobile Drawer (fixed) vs Desktop (relative) */}
+            {mobileExplorerOpen && <div className="fixed inset-0 bg-black/40 z-[130] md:hidden" onClick={() => setMobileExplorerOpen(false)} />}
+            <div className={`w-[280px] md:w-72 flex flex-col border-r transition-all duration-300 z-[140] ${isDark ? 'bg-[#0f0f12] border-white/5 shadow-2xl shadow-black/40' : 'bg-[#f0ede1] border-black/[0.05]'}
+                ${mobileExplorerOpen 
+                    ? 'translate-x-0 fixed left-0 h-full md:relative md:translate-x-0' 
+                    : '-translate-x-full fixed left-0 h-full md:relative md:translate-x-0 md:flex hidden'}`}>
+                
+                <div className="md:hidden flex items-center justify-between p-4 border-b border-white/5">
+                    <span className="text-[10px] font-black uppercase tracking-widest opacity-40">{activeSidebarView}</span>
+                    <button onClick={() => setMobileExplorerOpen(false)}><X size={16}/></button>
+                </div>
+
+                {activeSidebarView === 'explorer' ? (
+                    <>
+                        <div className="p-6 pb-2 flex items-center justify-between"><span className="text-[10px] font-black uppercase tracking-[0.3em] opacity-30">Explorer</span><div className="flex gap-2"><button onClick={fetchFiles} className="opacity-30 hover:opacity-100"><RotateCcw size={14}/></button></div></div>
+                        <div className="px-5 py-2"><input className={`w-full bg-black/5 dark:bg-white/5 border-none rounded-lg px-3 py-2 text-[12px] outline-none placeholder:opacity-20`} placeholder="Filter files..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} /></div>
+                        <div className="flex-1 overflow-auto py-2 group custom-scrollbar">{renderTree(fileTree)}</div>
+                    </>
+                ) : activeSidebarView === 'search' ? (
+                    <>
+                        <div className="p-6 pb-2 text-[10px] font-black uppercase tracking-[0.3em] opacity-30">Global Search</div>
+                        <div className="px-5 py-2"><div className="relative"><Search className="absolute left-3 top-2.5 opacity-20" size={14} /><input className={`w-full bg-black/5 dark:bg-white/5 border-none rounded-lg pl-10 pr-3 py-2.5 text-[12px] outline-none placeholder:opacity-40`} placeholder="Find in files..." value={contentSearch} onChange={(e) => setContentSearch(e.target.value)} /></div></div>
+                        <div className="flex-1 overflow-auto py-4 px-5 space-y-4 custom-scrollbar">
+                            {contentResults.length > 0 ? contentResults.map(f => (
+                                <div key={f.path} onClick={() => { handleOpenFile(f.path); setMobileExplorerOpen(false); }} className={`p-4 rounded-2xl border cursor-pointer transition-all ${isDark ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-white/60 border-black/5 hover:bg-white'}`}><p className="text-[12px] font-black text-primary-500 mb-2 truncate">{f.name}</p><p className="text-[10px] opacity-40 mb-3 truncate">{f.path}</p><div className="text-[11px] opacity-60 font-mono line-clamp-2 italic">...{f.content?.substring(f.content.toLowerCase().indexOf(contentSearch.toLowerCase()), f.content.toLowerCase().indexOf(contentSearch.toLowerCase()) + 100)}...</div></div>
+                            )) : contentSearch.length > 2 && <p className="text-center opacity-20 text-[12px] mt-10">No results found</p>}
+                        </div>
+                    </>
+                ) : activeSidebarView === 'history' ? (
+                    <>
+                        <div className="p-6 pb-2 flex items-center justify-between">
+                            <span className="text-[10px] font-black uppercase tracking-[0.3em] opacity-30">Archive</span>
+                            <div className="flex gap-2">
+                                 <button onClick={handleNewChat} className="p-1 px-3 bg-primary-500/10 text-primary-500 rounded-full text-[8px] font-black uppercase tracking-widest hover:bg-primary-500 hover:text-white transition-all">+ New Chat</button>
+                                 <button onClick={fetchSessions} className="opacity-30 hover:opacity-100"><RotateCcw size={14}/></button>
+                            </div>
+                        </div>
+                        <div className="flex-1 overflow-auto py-2 px-5 space-y-3 custom-scrollbar">
+                            {sessions.map(s => (
+                                <div key={s.id} onClick={() => { handleLoadSession(s.id); setMobileExplorerOpen(false); }} className={`relative p-5 rounded-3xl border cursor-pointer transition-all duration-500 group/session overflow-hidden ${activeSessionId == s.id ? (isDark ? 'bg-primary-500/[0.08] border-primary-500/30 shadow-2xl shadow-primary-900/20' : 'bg-primary-500/5 border-primary-500/20 shadow-xl shadow-primary-500/10') : (isDark ? 'bg-white/[0.02] border-white/5 hover:bg-white/[0.05] hover:border-white/10' : 'bg-white/40 border-black/[0.03] hover:bg-white hover:border-black/5')}`}>
+                                    {activeSessionId == s.id && <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-primary-500 rounded-r-full shadow-[0_0_15px_rgba(99,102,241,0.8)]" />}
+                                    <div className="flex flex-col gap-3">
+                                        <div className="flex items-center justify-between">
+                                            <p className={`text-[13px] font-black leading-tight truncate group-hover/session:text-primary-500 transition-colors flex-1 ${activeSessionId == s.id ? 'text-primary-500' : (isDark ? 'text-slate-300' : 'text-slate-900')}`}>{s.title || 'Collaborative Node'}</p>
+                                            <button onClick={(e) => handleDeleteSession(e, s.id)} className="opacity-0 group-hover/session:opacity-100 p-2 text-red-500/50 hover:text-red-500 transition-all hover:scale-110"><Trash2 size={12} /></button>
                                         </div>
-                                        <span className="text-[9px] font-black uppercase tracking-[0.1em] opacity-20 group-hover/session:opacity-40 transition-opacity">{timeAgo(s.created_at)}</span>
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-2 opacity-30 text-[9px] font-bold uppercase tracking-widest group-hover/session:opacity-60 transition-opacity">
+                                                <MessageSquare size={12} /> {s.message_count || 0} Events
+                                            </div>
+                                            <span className="text-[9px] font-black uppercase tracking-[0.1em] opacity-20 group-hover/session:opacity-40 transition-opacity">{timeAgo(s.created_at)}</span>
+                                        </div>
                                     </div>
+                                    <div className={`absolute -inset-[1px] rounded-3xl bg-gradient-to-br from-primary-500/5 to-transparent opacity-0 group-hover/session:opacity-100 transition-opacity pointer-events-none`} />
                                 </div>
-                                <div className={`absolute -inset-[1px] rounded-3xl bg-gradient-to-br from-primary-500/5 to-transparent opacity-0 group-hover/session:opacity-100 transition-opacity pointer-events-none`} />
-                            </div>
-                        ))}
-                        {sessions.length === 0 && (
-                            <div className="flex flex-col items-center justify-center p-12 opacity-10 space-y-4">
-                                <History size={48} />
-                                <p className="text-[10px] font-black uppercase tracking-[0.3em]">No Archives Found</p>
-                            </div>
-                        )}
-                    </div>
-                </>
-            ) : (
-                <>
-                    <div className="p-6 pb-2 flex items-center justify-between">
-                        <span className="text-[10px] font-black uppercase tracking-[0.3em] opacity-30">Source Control</span>
-                        <button onClick={fetchGitStatus} disabled={gitLoading} className="opacity-30 hover:opacity-100"><RotateCcw size={14} className={gitLoading ? 'animate-spin' : ''}/></button>
-                    </div>
+                            ))}
+                        </div>
+                    </>
+                ) : (
+                    <>
+                        <div className="p-6 pb-2 flex items-center justify-between">
+                            <span className="text-[10px] font-black uppercase tracking-[0.3em] opacity-30">Source Control</span>
+                            <button onClick={fetchGitStatus} disabled={gitLoading} className="opacity-30 hover:opacity-100"><RotateCcw size={14} className={gitLoading ? 'animate-spin' : ''}/></button>
+                        </div>
                     <div className="px-5 py-4 space-y-4">
                         {!isGitInit ? (
                             <div className={`p-6 rounded-3xl border ${isDark ? 'bg-primary-500/5 border-primary-500/20' : 'bg-primary-50 border-primary-100'}`}>
@@ -930,24 +982,24 @@ export default function Project() {
                         </div>
 
                         <div className="flex-1 overflow-auto custom-scrollbar">
-                            <div className="flex min-h-full relative">
+                            <div className="flex min-h-full relative overflow-x-hidden">
                                 {/* AI RECONSTRUCTION OVERLAY */}
                                 {proposingContents[activeTab] && (
                                     <div className="absolute inset-0 z-10 pointer-events-none overflow-hidden flex">
-                                        <div className="w-[60px]" /> {/* Spacer for line numbers */}
-                                        <div className="flex-1 bg-primary-500/5 backdrop-blur-[1px] animate-pulse-slow px-10 pt-10" />
+                                        <div className="w-[40px] md:w-[60px]" /> {/* Spacer for line numbers */}
+                                        <div className="flex-1 bg-primary-500/5 backdrop-blur-[1px] animate-pulse-slow px-4 md:px-10 pt-4 md:pt-10" />
                                     </div>
                                 )}
 
                                 {/* LINE NUMBERS */}
-                                <div className={`p-10 pr-4 text-right font-mono text-[14px] select-none opacity-20 border-r ${isDark ? 'border-white/5' : 'border-black/5'}`} style={{ minWidth: '60px', backgroundColor: 'transparent' }}>
+                                <div className={`p-4 md:p-10 pr-2 md:pr-4 text-right font-mono text-[11px] md:text-[14px] select-none opacity-20 border-r ${isDark ? 'border-white/5' : 'border-black/5'}`} style={{ minWidth: '40px', backgroundColor: 'transparent' }}>
                                     {(proposingContents[activeTab] || editingContents[activeTab] || '').split('\n').map((_, i) => (
                                         <div key={i} style={{ height: '1.9em', lineHeight: '1.9em' }}>{i + 1}</div>
                                     ))}
                                 </div>
                                 
                                 {/* EDITOR CONTENT */}
-                                <div className="flex-1 p-10 pt-10 pl-4 relative">
+                                <div className="flex-1 p-4 md:p-10 pt-4 md:pt-10 pl-4 md:pl-4 relative overflow-x-hidden">
                                     {proposingContents[activeTab] && (
                                         <div className="flex items-center gap-2 mb-6 text-[10px] font-bold text-primary-500 uppercase tracking-widest bg-primary-500/10 w-fit px-3 py-1 rounded-full">
                                             <Sparkles size={12}/> AI RECONSTRUCTION IN PROGRESS...
@@ -980,32 +1032,58 @@ export default function Project() {
                     </div>
                 )}
                 {/* TELEMETRY FEED - REFINED */}
-                <div className={`h-48 border-t p-6 overflow-auto font-mono text-[12px] space-y-2 custom-scrollbar transition-all duration-700 ${isDark ? 'bg-[#08080a] border-white/5 text-slate-500 shadow-[inset_0_20px_40px_rgba(0,0,0,0.5)]' : 'bg-[#f5f2e8] border-black/5 text-slate-400 shadow-inner'}`}>
-                    <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center gap-3 font-black uppercase tracking-[0.4em] opacity-40 text-primary-500">
-                             <Activity size={14} className="animate-pulse" /> 
+                <div className={`transition-all duration-500 ease-in-out border-t overflow-hidden flex flex-col ${showDiagnostics ? 'h-48' : 'h-10'} ${isDark ? 'bg-[#08080a] border-white/5' : 'bg-[#f5f2e8] border-black/5'}`}>
+                    <div onClick={() => setShowDiagnostics(!showDiagnostics)} className="flex items-center justify-between px-6 py-2 cursor-pointer hover:bg-white/5 transition-colors shrink-0">
+                        <div className="flex items-center gap-3 font-black uppercase tracking-[0.4em] opacity-40 text-primary-500 text-[10px]">
+                             <Activity size={12} className={showDiagnostics ? "animate-pulse" : ""} /> 
                              Pulse Diagnostics
                         </div>
                         <div className="flex items-center gap-4">
-                            <span className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-green-500/10 text-green-500 border border-green-500/20 animate-pulse">● LIVE_NODE</span>
-                            <span className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-blue-500/10 text-blue-500 border border-blue-500/20">DB_LINK_ACTIVE</span>
+                            {!showDiagnostics && systemLogs.length > 0 && (
+                                <span className="text-[9px] font-mono opacity-40 truncate max-w-[200px] hidden md:block">{systemLogs[systemLogs.length-1]}</span>
+                            )}
+                            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-green-500/10 text-green-500 border border-green-500/20 text-[8px] font-bold tracking-widest animate-pulse">LIVE_NODE</div>
+                            <ChevronDown size={14} className={`transition-transform duration-300 opacity-40 ${showDiagnostics ? '' : 'rotate-180'}`} />
                         </div>
                     </div>
-                    {systemLogs.map((log, i) => (
-                        <div key={i} className={`flex gap-4 group/log py-0.5 border-l-2 pl-3 transition-all ${log.startsWith('[THOUGHT]') ? 'border-primary-500/40 text-primary-500/70' : 'border-transparent hover:border-slate-800'}`}>
-                            <span className="opacity-20 shrink-0 select-none">[{new Date().toLocaleTimeString()}]</span>
-                            <span className="truncate group-hover/log:whitespace-normal group-hover/log:break-all">{log}</span>
+                    {showDiagnostics && (
+                        <div className={`p-6 pt-0 overflow-auto font-mono text-[12px] space-y-2 flex-1 custom-scrollbar ${isDark ? 'text-slate-500 shadow-[inset_0_20px_40px_rgba(0,0,0,0.5)]' : 'text-slate-400 shadow-inner'}`}>
+                            {systemLogs.map((log, i) => (
+                                <div key={i} className={`flex gap-4 group/log py-0.5 border-l-2 pl-3 transition-all ${log.startsWith('[THOUGHT]') ? 'border-primary-500/40 text-primary-500/70' : 'border-transparent hover:border-slate-800'}`}>
+                                    <span className="opacity-20 shrink-0 select-none text-[10px]">[{new Date().toLocaleTimeString()}]</span>
+                                    <span className="truncate group-hover/log:whitespace-normal group-hover/log:break-all">{log}</span>
+                                </div>
+                            ))}
                         </div>
-                    ))}
+                    )}
                 </div>
             </div>
         </div>
 
-        {/* Chat Sidebar */}
-        <div className={`w-[460px] border-l flex flex-col relative transition-all duration-300 ${showChat ? 'translate-x-0' : 'translate-x-full fixed right-[-460px]'} ${isDark ? 'bg-[#0a0a0c] border-white/5 shadow-2xl shadow-black/80' : 'bg-[#f5f2eb] border-black/[0.05]'}`}>
-            {!showChat && <button onClick={() => setShowChat(true)} className={`absolute left-[-40px] top-1/2 -translate-y-1/2 w-10 h-20 border rounded-l-2xl flex items-center justify-center shadow-2xl hover:scale-105 transition-all ${isDark ? 'bg-[#111114] border-white/10 text-primary-400' : 'bg-[#f5f2eb] border-black/5'}`}><Sparkles size={24} /></button>}
-            <div className={`p-8 flex items-center justify-between`}>
-                <div className="flex items-center gap-4"><div className="w-10 h-10 bg-primary-600 rounded-2xl flex items-center justify-center text-white shadow-2xl shadow-primary-600/30"><Zap size={20} /></div><h2 className="text-[14px] font-black uppercase tracking-[0.4em]">HatAI Code</h2></div>
+        {/* Chat Sidebar - Responsive Drawer */}
+        {showChat && (
+            <div 
+                className="fixed inset-0 bg-black/60 z-[80] md:hidden animate-fade-in backdrop-blur-sm"
+                onClick={() => setShowChat(false)}
+            />
+        )}
+        
+        <div className={`w-[280px] md:w-[460px] border-l flex flex-col z-[90] transition-all duration-300 h-full overflow-x-hidden
+            ${showChat ? 'translate-x-0 fixed right-0' : 'translate-x-full fixed right-[-460px] md:relative md:right-0'} 
+            ${isDark ? 'bg-[#0a0a0c] border-white/5 shadow-2xl shadow-black/80' : 'bg-[#f5f2eb] border-black/[0.05]'}`}>
+            
+            {!showChat && (
+                <button onClick={() => setShowChat(true)} className={`hidden md:flex absolute left-[-40px] top-1/2 -translate-y-1/2 w-10 h-20 border rounded-l-2xl items-center justify-center shadow-2xl hover:scale-105 transition-all ${isDark ? 'bg-[#111114] border-white/10 text-primary-400' : 'bg-[#f5f2eb] border-black/5'}`}>
+                    <Sparkles size={24} />
+                </button>
+            )}
+            <div className={`p-6 md:p-8 flex items-center justify-between`}>
+                <div className="flex items-center gap-3 md:gap-4 min-w-0">
+                    <div className="flex-shrink-0 w-8 h-8 md:w-10 md:h-10 bg-primary-600 rounded-xl md:rounded-2xl flex items-center justify-center text-white shadow-2xl shadow-primary-600/30">
+                        <Zap size={16} />
+                    </div>
+                    <h2 className="text-[12px] md:text-[14px] font-black uppercase tracking-[0.2em] md:tracking-[0.4em] truncate">HatAI Code</h2>
+                </div>
                 <button onClick={() => setShowChat(false)} className={`p-2 rounded-xl transition-all ${isDark ? 'hover:bg-white/5 text-slate-500 hover:text-white' : 'hover:bg-black/5 text-slate-300 hover:text-black'}`}><X size={18} /></button>
             </div>
             <div className="flex-1 overflow-y-auto px-8 py-6 space-y-10 custom-scrollbar scroll-smooth" ref={chatScrollRef}>
@@ -1116,6 +1194,46 @@ export default function Project() {
                                                     {JSON.stringify(tc.args, null, 2)}
                                                 </div>
                                             )}
+                                            {tc.result && tc.result.results && (
+                                                <div className="mt-4 grid grid-cols-1 gap-3">
+                                                    {tc.result.results.map((r, k) => {
+                                                        let hostname = 'Web'
+                                                        try { if(r.url) hostname = new URL(r.url).hostname.replace('www.', '') } catch { }
+                                                        return (
+                                                            <div key={k} className={`group/res bg-white/40 dark:bg-black/40 p-4 rounded-2xl border ${isDark ? 'border-white/5 hover:border-primary-500/30' : 'border-black/5 hover:border-primary-500/20'} transition-all relative overflow-hidden`}>
+                                                                <div className="flex items-center justify-between mb-2">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <div className="w-7 h-7 rounded-lg bg-primary-500/10 flex items-center justify-center text-primary-500">
+                                                                            <Globe size={14} />
+                                                                        </div>
+                                                                        <div>
+                                                                            <p className="text-[9px] text-primary-500 font-black uppercase tracking-[0.2em] leading-none mb-0.5">{hostname}</p>
+                                                                            <h4 className="text-[12px] font-bold truncate max-w-[220px] md:max-w-md">{r.title}</h4>
+                                                                        </div>
+                                                                    </div>
+                                                                    <a href={r.url} target="_blank" rel="noopener noreferrer" className="p-1.5 opacity-40 hover:opacity-100 transition-opacity">
+                                                                        <ExternalLink size={12} />
+                                                                    </a>
+                                                                </div>
+                                                                <p className="text-[11px] opacity-60 line-clamp-2 leading-relaxed">{r.snippet || r.content?.substring(0, 120)}</p>
+                                                                
+                                                                {r.content && (
+                                                                    <details className="mt-2 group/det">
+                                                                        <summary className="list-none cursor-pointer text-[9px] font-black uppercase tracking-[0.15em] opacity-30 hover:opacity-70 transition-opacity flex items-center gap-1.5">
+                                                                            <ChevronRight size={10} className="group-open/det:rotate-90 transition-transform" />
+                                                                            Intel Data
+                                                                        </summary>
+                                                                        <div className="mt-2 p-3 bg-black/20 rounded-xl text-[10px] opacity-50 font-medium leading-relaxed max-h-32 overflow-y-auto custom-scrollbar whitespace-pre-wrap italic">
+                                                                            {r.content}
+                                                                        </div>
+                                                                    </details>
+                                                                )}
+                                                            </div>
+                                                        )
+                                                    })}
+                                                </div>
+                                            )}
+
                                             {tc.result && tc.result.error && (
                                                 <div className="mt-3 p-4 rounded-2xl bg-red-500/5 border border-red-500/10 text-red-500 text-[11px] font-bold flex items-center gap-3 shadow-lg shadow-red-900/10">
                                                     <X size={14} className="shrink-0" />

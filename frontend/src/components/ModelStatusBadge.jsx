@@ -1,11 +1,13 @@
 import { useEffect, useState, useRef } from 'react'
 import api from '../api'
-import { Cpu, Loader2, Sparkles, ChevronDown, CheckCircle2, Zap, Brain, Server } from 'lucide-react'
+import { Cpu, Loader2, Sparkles, ChevronDown, CheckCircle2, Zap, Brain, Server, Settings } from 'lucide-react'
 
 export default function ModelStatusBadge({ isCollapsed }) {
   const [status, setStatus] = useState(null)
   const [switching, setSwitching] = useState(false)
   const [isOpen, setIsOpen] = useState(false)
+  const [editingModel, setEditingModel] = useState(null) // 'gemini', 'ollama', 'openai'
+  const [modelValue, setModelValue] = useState('')
   const dropdownRef = useRef(null)
 
   const fetchStatus = async () => {
@@ -23,6 +25,7 @@ export default function ModelStatusBadge({ isCollapsed }) {
     const handleClickOutside = (e) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
         setIsOpen(false)
+        setEditingModel(null)
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
@@ -47,6 +50,25 @@ export default function ModelStatusBadge({ isCollapsed }) {
     }
   }
 
+  const handleUpdateModel = async (provider, modelName) => {
+    if (!modelName) return
+    setSwitching(true)
+    try {
+      const payload = {}
+      if (provider === 'gemini') payload.gemini_model = modelName
+      else if (provider === 'ollama') payload.ollama_model = modelName
+      else if (provider === 'openai') payload.openai_model = modelName
+      
+      await api.post('/ai/settings', payload)
+      await fetchStatus()
+      setEditingModel(null)
+    } catch (err) {
+      console.error('Update model failed:', err)
+    } finally {
+      setSwitching(false)
+    }
+  }
+
   if (!status) return null
 
   const activeProvider = status.provider || 'local'
@@ -63,7 +85,7 @@ export default function ModelStatusBadge({ isCollapsed }) {
   const isReady = activeProvider === 'gemini' ? geminiStatus.ready : activeProvider === 'ollama' ? ollamaStatus.ready : activeProvider === 'openai' ? openaiStatus.ready : localStatus.loaded
   const isLoading = activeProvider === 'local' && localStatus.loading
 
-  const currentModelName = isLocal ? 'Qwen3-4B' : isGemini ? (geminiStatus.model || 'Gemini 2.0 Flash') : isOllama ? 'Ollama' : (openaiStatus.model || 'OpenAI Server')
+  const currentModelName = isLocal ? 'Qwen3-4B' : isGemini ? (geminiStatus.model || 'Gemini 2.0 Flash') : isOllama ? (ollamaStatus.model || 'Ollama') : (openaiStatus.model || 'OpenAI Server')
 
   return (
     <div className="relative mb-4 px-1" ref={dropdownRef}>
@@ -72,7 +94,7 @@ export default function ModelStatusBadge({ isCollapsed }) {
           <span className="text-[10px] uppercase tracking-[0.15em] font-black text-light-500 dark:text-slate-500/80 uppercase tracking-widest">Intelligence Engine</span>
           {switching && (
             <div className="flex items-center gap-1.5 animate-pulse">
-              <span className="text-[9px] font-bold text-primary-600 dark:text-primary-500 uppercase">Switching...</span>
+              <span className="text-[9px] font-bold text-primary-600 dark:text-primary-500 uppercase">Processing...</span>
               <Loader2 size={10} className="animate-spin text-primary-600 dark:text-primary-500" />
             </div>
           )}
@@ -111,7 +133,7 @@ export default function ModelStatusBadge({ isCollapsed }) {
         
         {!isCollapsed && (
           <div className="relative min-w-0 flex-1">
-            <p className="text-sm font-black text-light-900 dark:text-white tracking-tight leading-none mb-1">{currentModelName}</p>
+            <p className="text-sm font-black text-light-900 dark:text-white tracking-tight leading-none mb-1 truncate">{currentModelName}</p>
             <div className="flex items-center gap-1.5">
               <span className={`text-[10px] font-bold uppercase tracking-wider ${isReady ? 'text-emerald-600/90 dark:text-emerald-400/80' : isLoading ? 'text-yellow-600/90 dark:text-yellow-400/80' : 'text-red-600/90 dark:text-red-400/80'}`}>
                 {isReady ? 'Engine Active' : isLoading ? 'Warming Up' : 'Engine Idle'}
@@ -154,70 +176,151 @@ export default function ModelStatusBadge({ isCollapsed }) {
             </button>
 
             {/* Gemini Option */}
-            <button
-              onClick={() => handleSwitch('gemini')}
-              className={`w-full group relative flex items-center gap-3.5 p-3 rounded-xl transition-all duration-300 ${
-                isGemini 
-                  ? 'bg-purple-50 dark:bg-purple-600/10 border border-purple-500/20' 
-                  : 'hover:bg-light-100 dark:hover:bg-white/5 border border-transparent'
-              }`}
-            >
-              <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${isGemini ? 'bg-purple-100 dark:bg-purple-500/20 text-purple-600 dark:text-purple-400' : 'bg-light-200 dark:bg-slate-800 text-light-500 dark:text-slate-500 group-hover:bg-light-300 dark:group-hover:bg-slate-700'}`}>
-                <Zap size={20} />
-              </div>
-              <div className="flex-1 text-left min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className={`text-sm font-bold tracking-tight ${isGemini ? 'text-purple-700 dark:text-purple-400' : 'text-light-700 dark:text-slate-300 group-hover:text-light-900 dark:group-hover:text-white'}`}>Gemini 2.0</span>
-                  {isGemini && <div className="h-1.5 w-1.5 rounded-full bg-purple-500 animate-pulse" />}
+            <div className={`w-full flex flex-col rounded-xl transition-all duration-300 ${isGemini ? 'bg-purple-50 dark:bg-purple-600/10 border border-purple-500/20' : 'border border-transparent'}`}>
+              <button
+                onClick={() => handleSwitch('gemini')}
+                className={`w-full group relative flex items-center gap-3.5 p-3 rounded-xl transition-all duration-300 ${!isGemini ? 'hover:bg-light-100 dark:hover:bg-white/5' : ''}`}
+              >
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${isGemini ? 'bg-purple-100 dark:bg-purple-500/20 text-purple-600 dark:text-purple-400' : 'bg-light-200 dark:bg-slate-800 text-light-500 dark:text-slate-500 group-hover:bg-light-300 dark:group-hover:bg-slate-700'}`}>
+                  <Zap size={20} />
                 </div>
-                <p className="text-[10px] text-light-500 dark:text-slate-500 group-hover:text-light-600 dark:group-hover:text-slate-400 truncate">Max reasoning & API power</p>
-              </div>
-              {isGemini && <CheckCircle2 size={16} className="text-purple-600 dark:text-purple-500 flex-shrink-0" />}
-            </button>
+                <div className="flex-1 text-left min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className={`text-sm font-bold tracking-tight ${isGemini ? 'text-purple-700 dark:text-purple-400' : 'text-light-700 dark:text-slate-300 group-hover:text-light-900 dark:group-hover:text-white'}`}>Gemini 2.0</span>
+                    {isGemini && <div className="h-1.5 w-1.5 rounded-full bg-purple-500 animate-pulse" />}
+                  </div>
+                  {editingModel === 'gemini' ? (
+                    <div className="mt-1 flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                      <input 
+                        className="flex-1 bg-white dark:bg-dark-950 border border-purple-500/30 rounded-lg px-2 py-1 text-xs focus:ring-1 focus:ring-purple-500 outline-none"
+                        value={modelValue}
+                        onChange={e => setModelValue(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && handleUpdateModel('gemini', modelValue)}
+                        autoFocus
+                        placeholder="Model name..."
+                      />
+                      <button 
+                        onClick={() => handleUpdateModel('gemini', modelValue)}
+                        className="p-1 px-2 bg-purple-600 text-white rounded-lg text-[10px] font-bold"
+                      >
+                        Apply
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <p className="text-[10px] text-light-500 dark:text-slate-500 truncate">{geminiStatus.model || 'gemini-2.0-flash'}</p>
+                      {isGemini && (
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); setEditingModel('gemini'); setModelValue(geminiStatus.model || '') }}
+                          className="p-1 text-purple-600 hover:bg-purple-100 dark:hover:bg-purple-500/20 rounded-md transition-colors"
+                        >
+                          <Settings size={12} />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+                {isGemini && <CheckCircle2 size={16} className="text-purple-600 dark:text-purple-500 flex-shrink-0" />}
+              </button>
+            </div>
 
             {/* Ollama Option */}
-            <button
-              onClick={() => handleSwitch('ollama')}
-              className={`w-full group relative flex items-center gap-3.5 p-3 rounded-xl transition-all duration-300 ${
-                isOllama 
-                  ? 'bg-emerald-50 dark:bg-emerald-600/10 border border-emerald-500/20' 
-                  : 'hover:bg-light-100 dark:hover:bg-white/5 border border-transparent'
-              }`}
-            >
-              <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${isOllama ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-light-200 dark:bg-slate-800 text-light-500 dark:text-slate-500 group-hover:bg-light-300 dark:group-hover:bg-slate-700'}`}>
-                <Cpu size={20} />
-              </div>
-              <div className="flex-1 text-left min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className={`text-sm font-bold tracking-tight ${isOllama ? 'text-emerald-700 dark:text-emerald-400' : 'text-light-700 dark:text-slate-300 group-hover:text-light-900 dark:group-hover:text-white'}`}>Ollama Engine</span>
-                  {isOllama && <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />}
+            <div className={`w-full flex flex-col rounded-xl transition-all duration-300 ${isOllama ? 'bg-emerald-50 dark:bg-emerald-600/10 border border-emerald-500/20' : 'border border-transparent'}`}>
+              <button
+                onClick={() => handleSwitch('ollama')}
+                className={`w-full group relative flex items-center gap-3.5 p-3 rounded-xl transition-all duration-300 ${!isOllama ? 'hover:bg-light-100 dark:hover:bg-white/5' : ''}`}
+              >
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${isOllama ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-light-200 dark:bg-slate-800 text-light-500 dark:text-slate-500 group-hover:bg-light-300 dark:group-hover:bg-slate-700'}`}>
+                  <Cpu size={20} />
                 </div>
-                <p className="text-[10px] text-light-500 dark:text-slate-500 group-hover:text-light-600 dark:group-hover:text-slate-400 truncate">Connect to Ollama local/server</p>
-              </div>
-              {isOllama && <CheckCircle2 size={16} className="text-emerald-600 dark:text-emerald-500 flex-shrink-0" />}
-            </button>
+                <div className="flex-1 text-left min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className={`text-sm font-bold tracking-tight ${isOllama ? 'text-emerald-700 dark:text-emerald-400' : 'text-light-700 dark:text-slate-300 group-hover:text-light-900 dark:group-hover:text-white'}`}>Ollama</span>
+                    {isOllama && <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />}
+                  </div>
+                  {editingModel === 'ollama' ? (
+                    <div className="mt-1 flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                      <input 
+                        className="flex-1 bg-white dark:bg-dark-950 border border-emerald-500/30 rounded-lg px-2 py-1 text-xs focus:ring-1 focus:ring-emerald-500 outline-none"
+                        value={modelValue}
+                        onChange={e => setModelValue(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && handleUpdateModel('ollama', modelValue)}
+                        autoFocus
+                        placeholder="Model name..."
+                      />
+                      <button 
+                        onClick={() => handleUpdateModel('ollama', modelValue)}
+                        className="p-1 px-2 bg-emerald-600 text-white rounded-lg text-[10px] font-bold"
+                      >
+                        Apply
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-[10px] text-light-500 dark:text-slate-500 truncate">{ollamaStatus.model || 'qwen3.5:4b'}</p>
+                      {isOllama && (
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); setEditingModel('ollama'); setModelValue(ollamaStatus.model || '') }}
+                          className="p-1 text-emerald-600 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 rounded-md transition-colors"
+                        >
+                          <Settings size={12} />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+                {isOllama && <CheckCircle2 size={16} className="text-emerald-600 dark:text-emerald-500 flex-shrink-0" />}
+              </button>
+            </div>
 
             {/* OpenAI Option */}
-            <button
-              onClick={() => handleSwitch('openai')}
-              className={`w-full group relative flex items-center gap-3.5 p-3 rounded-xl transition-all duration-300 ${
-                isOpenAI 
-                  ? 'bg-blue-50 dark:bg-blue-600/10 border border-blue-500/20' 
-                  : 'hover:bg-light-100 dark:hover:bg-white/5 border border-transparent'
-              }`}
-            >
-              <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${isOpenAI ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400' : 'bg-light-200 dark:bg-slate-800 text-light-500 dark:text-slate-500 group-hover:bg-light-300 dark:group-hover:bg-slate-700'}`}>
-                <Server size={20} />
-              </div>
-              <div className="flex-1 text-left min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className={`text-sm font-bold tracking-tight ${isOpenAI ? 'text-blue-700 dark:text-blue-400' : 'text-light-700 dark:text-slate-300 group-hover:text-light-900 dark:group-hover:text-white'}`}>OpenAI / llama.cpp</span>
-                  {isOpenAI && <div className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />}
+            <div className={`w-full flex flex-col rounded-xl transition-all duration-300 ${isOpenAI ? 'bg-blue-50 dark:bg-blue-600/10 border border-blue-500/20' : 'border border-transparent'}`}>
+              <button
+                onClick={() => handleSwitch('openai')}
+                className={`w-full group relative flex items-center gap-3.5 p-3 rounded-xl transition-all duration-300 ${!isOpenAI ? 'hover:bg-light-100 dark:hover:bg-white/5' : ''}`}
+              >
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${isOpenAI ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400' : 'bg-light-200 dark:bg-slate-800 text-light-500 dark:text-slate-500 group-hover:bg-light-300 dark:group-hover:bg-slate-700'}`}>
+                  <Server size={20} />
                 </div>
-                <p className="text-[10px] text-light-500 dark:text-slate-500 group-hover:text-light-600 dark:group-hover:text-slate-400 truncate">Generic OpenAI compatible</p>
-              </div>
-              {isOpenAI && <CheckCircle2 size={16} className="text-blue-600 dark:text-blue-500 flex-shrink-0" />}
-            </button>
+                <div className="flex-1 text-left min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className={`text-sm font-bold tracking-tight ${isOpenAI ? 'text-blue-700 dark:text-blue-400' : 'text-light-700 dark:text-slate-300 group-hover:text-light-900 dark:group-hover:text-white'}`}>OpenAI / Llama.cpp</span>
+                    {isOpenAI && <div className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />}
+                  </div>
+                  {editingModel === 'openai' ? (
+                    <div className="mt-1 flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                      <input 
+                        className="flex-1 bg-white dark:bg-dark-950 border border-blue-500/30 rounded-lg px-2 py-1 text-xs focus:ring-1 focus:ring-blue-500 outline-none"
+                        value={modelValue}
+                        onChange={e => setModelValue(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && handleUpdateModel('openai', modelValue)}
+                        autoFocus
+                        placeholder="Model name..."
+                      />
+                      <button 
+                        onClick={() => handleUpdateModel('openai', modelValue)}
+                        className="p-1 px-2 bg-blue-600 text-white rounded-lg text-[10px] font-bold"
+                      >
+                        Apply
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-[10px] text-light-500 dark:text-slate-500 truncate">{openaiStatus.model || 'qwen3-4b'}</p>
+                      {isOpenAI && (
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); setEditingModel('openai'); setModelValue(openaiStatus.model || '') }}
+                          className="p-1 text-blue-600 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-md transition-colors"
+                        >
+                          <Settings size={12} />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+                {isOpenAI && <CheckCircle2 size={16} className="text-blue-600 dark:text-blue-500 flex-shrink-0" />}
+              </button>
+            </div>
           </div>
           
           <div className="mt-2 pt-2 border-t border-light-200 dark:border-slate-800/60 text-center">

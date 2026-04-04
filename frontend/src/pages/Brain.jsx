@@ -14,7 +14,6 @@ function Card({ children, className = "", title, icon: Icon, color = "primary", 
   const colors = {
     primary: "from-primary-500/10 to-transparent border-primary-500/20 text-primary-500 bg-primary-500/5",
     pink: "from-pink-500/10 to-transparent border-pink-500/20 text-pink-500 bg-pink-500/5",
-    primary: "from-primary-500/10 to-transparent border-primary-500/20 text-primary-500 bg-primary-500/5",
     orange: "from-orange-500/10 to-transparent border-orange-500/20 text-orange-500 bg-orange-500/5",
     blue: "from-blue-500/10 to-transparent border-blue-500/20 text-blue-500 bg-blue-500/5"
   }

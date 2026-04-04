@@ -171,13 +171,15 @@ def get_settings():
 
 @router.post("/settings", tags=["AI"])
 def update_settings(data: dict):
-    env_path = ".env"
-    import os
-    env_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env")
+    from core.config import BACKEND_DIR
+    env_file = os.path.join(BACKEND_DIR, ".env")
     
     gemini_key = data.get("gemini_api_key")
+    gemini_model = data.get("gemini_model")
     ollama_url = data.get("ollama_url")
+    ollama_model = data.get("ollama_model")
     openai_api_base = data.get("openai_api_base")
+    openai_model = data.get("openai_model")
     
     if os.path.exists(env_file):
         with open(env_file, "r") as f:
@@ -185,25 +187,38 @@ def update_settings(data: dict):
             
         settings_to_update = {}
         if gemini_key and not gemini_key.startswith("***") and "*" not in gemini_key:
-            settings_to_update["GEMINI_API_KEY"] = list(str(gemini_key)) # avoid saving direct object ref conceptually
             settings_to_update["GEMINI_API_KEY"] = gemini_key
-            
+        
+        if gemini_model:
+            settings_to_update["GEMINI_MODEL"] = gemini_model
+
         if ollama_url:
             settings_to_update["OLLAMA_URL"] = ollama_url
+        
+        if ollama_model:
+            settings_to_update["OLLAMA_MODEL"] = ollama_model
             
         if openai_api_base:
             settings_to_update["OPENAI_API_BASE"] = openai_api_base
+            
+        if openai_model:
+            settings_to_update["OPENAI_MODEL"] = openai_model
             
         new_lines = []
         updated_keys = set()
         
         for line in lines:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                new_lines.append(line + "\n")
+                continue
+                
             line_key = line.split("=")[0].strip() if "=" in line else ""
             if line_key in settings_to_update:
                 new_lines.append(f'{line_key}="{settings_to_update[line_key]}"\n')
                 updated_keys.add(line_key)
             else:
-                new_lines.append(line)
+                new_lines.append(line + "\n")
                 
         for key, val in settings_to_update.items():
             if key not in updated_keys:
@@ -212,21 +227,24 @@ def update_settings(data: dict):
         with open(env_file, "w") as f:
             f.writelines(new_lines)
             
-        import sys
-        import os
-        sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
         import core.config as config
         if "GEMINI_API_KEY" in settings_to_update:
             config.GEMINI_API_KEY = settings_to_update["GEMINI_API_KEY"]
+        if "GEMINI_MODEL" in settings_to_update:
+            config.GEMINI_MODEL = settings_to_update["GEMINI_MODEL"]
         if "OLLAMA_URL" in settings_to_update:
             config.OLLAMA_URL = settings_to_update["OLLAMA_URL"]
+        if "OLLAMA_MODEL" in settings_to_update:
+            config.OLLAMA_MODEL = settings_to_update["OLLAMA_MODEL"]
         if "OPENAI_API_BASE" in settings_to_update:
             config.OPENAI_API_BASE = settings_to_update["OPENAI_API_BASE"]
+        if "OPENAI_MODEL" in settings_to_update:
+            config.OPENAI_MODEL = settings_to_update["OPENAI_MODEL"]
             
         engine = LLMEngine.get()
-        engine.reload_provider_config() # Need to implement this in engine
+        engine.reload_provider_config()
             
-        return {"message": "Settings updated section"}
+        return {"message": "Settings updated", "updated": list(settings_to_update.keys())}
     return {"error": ".env file not found"}
 
 

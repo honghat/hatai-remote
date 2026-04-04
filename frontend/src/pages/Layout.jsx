@@ -43,8 +43,8 @@ export default function Layout() {
 
       {/* Sidebar */}
       <aside
-        className={`flex flex-col bg-white dark:bg-dark-900/90 border-r border-light-200 dark:border-slate-800/60 transition-all duration-150 ease-out fixed md:relative z-50 h-full
-          ${sidebarOpen ? 'w-[280px] md:w-60 translate-x-0' : 'w-16 -translate-x-full md:translate-x-0 md:w-16'}`}
+        className={`flex flex-col bg-white dark:bg-dark-900 border-r border-light-200 dark:border-slate-800/60 transition-all duration-300 ease-in-out fixed md:relative z-50 h-full overflow-x-hidden shadow-2xl md:shadow-none
+          ${sidebarOpen ? 'w-[280px] translate-x-0' : 'w-16 -translate-x-full md:translate-x-0 md:w-16'}`}
       >
         {/* Logo */}
         <div className="flex items-center gap-3 px-5 py-6 border-b border-light-200 dark:border-slate-800/60 bg-light-50/30 dark:bg-transparent">
@@ -52,9 +52,9 @@ export default function Layout() {
             <Bot size={20} className="text-white dark:text-primary-400" />
           </div>
           {sidebarOpen && (
-            <div className="min-w-0 animate-fade-in">
-              <p className="font-extrabold text-light-900 dark:text-white text-base tracking-tight leading-none">HatAI</p>
-              <p className="text-[10px] font-bold text-primary-600 dark:text-primary-500 mt-1 uppercase tracking-widest">Remote</p>
+            <div className="min-w-0 animate-fade-in flex-1">
+              <p className="font-extrabold text-light-900 dark:text-white text-base tracking-tight leading-none truncate">HatAI</p>
+              <p className="text-[10px] font-bold text-primary-600 dark:text-primary-500 mt-1 uppercase tracking-widest truncate">Remote</p>
             </div>
           )}
           <button
