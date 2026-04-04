@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 import ReactMarkdown from 'react-markdown'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
-import { vscDarkPlus, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import remarkGfm from 'remark-gfm'
 import Editor from 'react-simple-code-editor'
 import { highlight, languages } from 'prismjs/components/prism-core'
@@ -20,9 +20,10 @@ import {
   FileCode, Search, ChevronRight, Activity,
   Wand2, Copy, Save, X, History, Settings, Brain, Trash2,
   Sparkles, ChevronDown, Monitor, RotateCcw, Plus, Mic, ArrowRight,
-  GitBranch, ExternalLink, Cpu, Zap, Server, BrainCircuit,
+  GitBranch, ExternalLink, Cpu, Zap, Server, BrainCircuit, Check,
   Image as ImageIcon, AtSign, SquareSlash, Menu, LogOut, Code2, ListTodo, Clock, Puzzle, Bot, Sun, Moon,
-  MessageSquare, Link2
+  MessageSquare, Link2, FileText, CheckCircle2, AlertCircle, Globe, Pause, Play, Terminal, Camera, BookOpen, FolderOpen,
+  ListChecks, FilePlus, FileEdit, FileStack, ListTree, SearchCode, Code
 } from 'lucide-react'
 
 const NAV_ITEMS = [
@@ -34,6 +35,410 @@ const NAV_ITEMS = [
   { path: '/skills', label: 'Agent Skills', icon: Puzzle },
   { path: '/brain', label: 'Brain & Memory', icon: Brain },
 ]
+
+// ── Utility: strip base64 and image-related keys from a parsed result object
+function sanitizeResult(result) {
+  if (!result || typeof result !== 'object') return result;
+  if (Array.isArray(result)) return result;
+  const clean = {};
+  for (const [k, v] of Object.entries(result)) {
+    if (k === 'base64' || k === '_frontend_screenshot' || k === '_frontend_screenshot_path') continue;
+    if (typeof v === 'string' && v.length > 500 && /^[A-Za-z0-9+/=\s]+$/.test(v.slice(0, 100))) continue;
+    clean[k] = v;
+  }
+  return clean;
+}
+
+// Helper: remove inline base64 blobs from raw text
+function stripBase64FromText(text) {
+  if (!text || typeof text !== 'string') return text;
+  return text.replace(/(?:data:image\/[^;]+;base64,)?[A-Za-z0-9+/]{500,}={0,2}/g, '[image data removed]');
+}
+
+// Parse thinking blocks and answer from content
+function parseThinking(content) {
+  if (!content || typeof content !== 'string') {
+    return { thinking: '', answer: '', isThinkingComplete: true };
+  }
+  const thinkRegex = /<(?:think|thought)>([\s\S]*?)(?:<\/(?:think|thought)>|$)/gi;
+  let fullThinking = '';
+  let isThinkingComplete = true;
+  let lastEnd = 0;
+  let match;
+  while ((match = thinkRegex.exec(content)) !== null) {
+    const captured = match[1] ? match[1].trim() : '';
+    if (captured) {
+      if (fullThinking) fullThinking += '\n\n';
+      fullThinking += captured;
+    }
+    if (!match[0].includes('</think>') && !match[0].includes('</thought>')) {
+      isThinkingComplete = false;
+    }
+    lastEnd = thinkRegex.lastIndex;
+  }
+  let answer = content
+    .replace(/<(?:think|thought)>[\s\S]*?(?:<\/(?:think|thought)>|$)/gi, '')
+    .replace(/<\/?(?:think|thought)>/gi, '')
+    .trim();
+  return { thinking: fullThinking.trim(), answer: answer, isThinkingComplete };
+}
+
+// Robust agent content sanitizer
+function cleanAgentContent(text) {
+  if (!text || typeof text !== 'string') return '';
+  return text
+    .replace(/<(?:think|thought|tool|task)>[\s\S]*?<\/(?:think|thought|tool|task)>/gi, '')
+    .replace(/<\/(?:tool|task|think|thought)>/gi, '')
+    .replace(/```tool\s*\n[\s\S]*?\n```/g, '')
+    .replace(/```json\s*\n\s*\[?\s*\{"tool"[\s\S]*?\n```/g, '')
+    .replace(/^\s*\{"tool":\s*"[^"]*",\s*"args":\s*\{[^}]*\}\s*\}\s*$/gm, '')
+    .trim();
+}
+
+// Loose JSON parser for malformed LLM outputs
+function looseJsonParse(text) {
+  if (!text) return null;
+  text = text.trim();
+  try { return JSON.parse(text); } catch {
+    try {
+      // Handle "tool": "name" without braces if needed (rare)
+      const fixed = text.replace(/(['"])?([a-z0-9A-Z_]+)(['"])?\s*:\s*/g, '"$2": ');
+      return JSON.parse(fixed);
+    } catch {
+      // Final fallback: regex extract
+      const toolMatch = text.match(/"tool"\s*:\s*"([^"]+)"/);
+      if (toolMatch) {
+         const tool = toolMatch[1];
+         const args = {};
+         const kvMatches = text.matchAll(/"([^"]+)"\s*:\s*"([^"]+)"/g);
+         for (const m of kvMatches) if (m[1] !== 'tool') args[m[1]] = m[2];
+         return { tool, args };
+      }
+    }
+  }
+  return null;
+}
+
+function cleanLLMArtifacts(text) {
+  if (!text) return text;
+  return text
+    .replace(/^[\}\s\n]*```[a-zA-Z0-9_#-]*\s*/, "") 
+    .replace(/```\s*$/, "")
+    .replace(/^[\}\s\n]+/, "")
+    .replace(/^\{\s*"$/, "")
+    .replace(/<\/?(?:tool|task|think|thought)>/gi, "")
+    .trim();
+}
+
+function parseEventsFromContent(content) {
+  if (!content || typeof content !== 'string') return [];
+  const events = [];
+  let lastIndex = 0;
+  const blockRegex = /(<(?:think|thought|tool|task)>[\s\S]*?<\/(?:think|thought|tool|task)>)|(🔧 \*\*.*?\*\*\(.*?\))|(📤 \*\*Result \(.*?\)\*\*: [\s\S]*?)(?=\n\n|\s*🔧|\s*📤 \*\*Result|\s*📸|\s*❌|$)|(\n?📸 Screenshot: .*?(?=\n|$))|(\n?❌ \*\*Error\*\*: .*?(?=\n|$))|(\n?```tool\s*\n?([\s\S]*?)\n?```)|(tool\s*\{[\s\S]*?\}(?=\s*(?:```|\n|$))|\{\s*"tool"\s*:[\s\S]*?\}(?=\s*(?:```|\n|$)))|(\[(?:read_file|list_dir|project_tree|search_code|edit_file|multi_edit_file|write_file|deep_search|run_command|sys_key|sys_click|browser_go|browser_read|screenshot)\]\s*.*?(?=\n|$))|(📋\s*KẾ\s*HOẠCH:[\s\S]*?)(?=\n\n|\s*🔧|\s*📤 \*\*Result|\s*📸|\s*❌|$)/gs;
+
+  let match;
+  while ((match = blockRegex.exec(content)) !== null) {
+    const start = match.index;
+    if (start > lastIndex) {
+      const textPart = cleanLLMArtifacts(stripBase64FromText(content.slice(lastIndex, start).trim()));
+      if (textPart && textPart !== '[image data removed]') {
+        const { thinking, answer } = parseThinking(textPart);
+        if (thinking) events.push({ type: 'thinking', content: thinking });
+        if (answer) events.push({ type: 'text', content: answer });
+        else if (!thinking) events.push({ type: 'text', content: textPart });
+      }
+    }
+    if (match[1]) {
+      const tagMatch = match[1].match(/<(think|thought|tool|task)>([\s\S]*?)<\/\1>/i);
+      if (tagMatch) {
+        const tag = tagMatch[1].toLowerCase();
+        const inner = tagMatch[2].trim();
+        if (tag === 'think' || tag === 'thought') {
+          events.push({ type: 'thinking', content: inner });
+        } else if (tag === 'tool' || tag === 'task') {
+          try {
+            const data = JSON.parse(inner);
+            if (data.tool) events.push({ type: 'tool_call', tool: data.tool, args: data.args || data });
+            else if (data.task) events.push({ type: 'text', content: `🎯 Task: ${data.task}` });
+          } catch {
+            if (inner) events.push({ type: 'text', content: inner });
+          }
+        }
+      }
+    } else if (match[2]) {
+      const toolMatch = match[2].match(/🔧 \*\*(.*?)\*\*\((.*?)\)/s);
+      if (toolMatch) {
+        try {
+          const tool = toolMatch[1].trim();
+          const argsText = toolMatch[2].trim();
+          let args = {};
+          try { args = JSON.parse(argsText); } catch {
+            const kvMatches = argsText.matchAll(/"([^"]+)"\s*:\s*"([^"]+)"/g);
+            for (const kv of kvMatches) args[kv[1]] = kv[2];
+          }
+          events.push({ type: 'tool_call', tool, args });
+        } catch { events.push({ type: 'text', content: match[2].trim() }); }
+      }
+    } else if (match[3]) {
+      const resultMatch = match[3].match(/📤 \*\*Result \((.*?)\)\*\*: ([\s\S]*)/);
+      if (resultMatch) {
+        const tool = resultMatch[1].trim();
+        let rawResult = resultMatch[2].trim();
+        let result = rawResult;
+        try { if (rawResult[0] === '{' || rawResult[0] === '[') result = sanitizeResult(JSON.parse(rawResult)); } catch { }
+        if (typeof result === 'string') result = stripBase64FromText(result);
+        if (typeof result === 'object' && result !== null) {
+          const path = result.path || result.file_path || '';
+          if (tool === 'screenshot' && path) {
+            const filename = path.split('/').pop();
+            events.push({ type: 'screenshot', url: `/agent/screenshots/${filename}` });
+          }
+        }
+        events.push({ type: 'tool_result', tool, result });
+      }
+    } else if (match[4]) {
+      const path = match[4].replace(/^\n?📸 Screenshot: /, '').trim();
+      const filename = path.split('/').pop();
+      events.push({ type: 'screenshot', url: `/agent/screenshots/${filename}` });
+    } else if (match[5]) {
+      const errorText = match[5].replace(/^\n?❌ \*\*Error\*\*: /, '').trim();
+      events.push({ type: 'error', content: errorText });
+    } else if (match[6]) {
+      const toolData = looseJsonParse(match[7]);
+      if (toolData?.tool) {
+        events.push({ type: 'tool_call', tool: toolData.tool, args: toolData.args || toolData });
+      } else { events.push({ type: 'text', content: match[6] }); }
+    } else if (match[8]) {
+      const toolData = looseJsonParse(match[8].replace(/^tool\s*/, ''));
+      if (toolData?.tool) {
+        events.push({ type: 'tool_call', tool: toolData.tool, args: toolData.args || toolData });
+      } else { events.push({ type: 'text', content: match[8] }); }
+    } else if (match[9]) {
+      events.push({ type: 'step', content: match[9].trim() });
+    } else if (match[10]) {
+      events.push({ type: 'plan', content: match[10].trim() });
+    }
+    lastIndex = blockRegex.lastIndex;
+  }
+  if (lastIndex < content.length) {
+    const raw = content.slice(lastIndex).trim();
+    const remaining = cleanLLMArtifacts(stripBase64FromText(raw));
+    if (remaining && remaining !== '[image data removed]') {
+      const { thinking, answer } = parseThinking(remaining);
+      if (thinking) events.push({ type: 'thinking', content: thinking });
+      if (answer) events.push({ type: 'text', content: answer });
+      else events.push({ type: 'text', content: remaining });
+    }
+  }
+  return events;
+}
+
+const TOOL_META = {
+  shell: { icon: Terminal, label: 'Shell', color: 'text-emerald-400', bg: 'bg-emerald-900/20 border-emerald-700/30' },
+  read_file: { icon: FileText, label: 'Đọc File', color: 'text-blue-400', bg: 'bg-blue-900/20 border-blue-700/30' },
+  write_file: { icon: FilePlus, label: 'Ghi File', color: 'text-purple-400', bg: 'bg-purple-900/20 border-purple-700/30' },
+  edit_file: { icon: FileEdit, label: 'Chỉnh sửa', color: 'text-indigo-400', bg: 'bg-indigo-900/20 border-indigo-700/30' },
+  multi_edit_file: { icon: FileStack, label: 'Sửa hàng loạt', color: 'text-indigo-400', bg: 'bg-indigo-900/20 border-indigo-700/30' },
+  list_dir: { icon: FolderOpen, label: 'Thư mục', color: 'text-yellow-400', bg: 'bg-yellow-900/20 border-yellow-700/30' },
+  project_tree: { icon: ListTree, label: 'Cấu trúc dự án', color: 'text-yellow-400', bg: 'bg-yellow-900/20 border-yellow-700/30' },
+  search_code: { icon: SearchCode, label: 'Tìm code', color: 'text-cyan-400', bg: 'bg-cyan-900/20 border-cyan-700/30' },
+  screenshot: { icon: Camera, label: 'Screenshot', color: 'text-pink-400', bg: 'bg-pink-900/20 border-pink-700/30' },
+  deep_search: { icon: Globe, label: 'Deep Search', color: 'text-orange-400', bg: 'bg-orange-900/20 border-orange-700/30' },
+  web_search: { icon: Globe, label: 'Tìm kiếm Web', color: 'text-orange-400', bg: 'bg-orange-900/20 border-orange-700/30' },
+}
+
+function Roadmap({ content, isDark }) {
+  const lines = content.split('\n').filter(l => l.trim() && !l.includes('KẾ HOẠCH'))
+  return (
+    <div className={`my-6 overflow-hidden rounded-[24px] border transition-all duration-500 shadow-2xl ${isDark ? 'bg-slate-900/60 border-white/10 shadow-primary-500/5' : 'bg-white border-slate-200 shadow-slate-200/50'}`}>
+      <div className={`px-6 py-4 border-b flex items-center justify-between ${isDark ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-primary-500/20 rounded-xl text-primary-400"><ListChecks size={18} /></div>
+          <div>
+            <h4 className={`text-[13px] font-black uppercase tracking-[0.1em] ${isDark ? 'text-white' : 'text-slate-900'}`}>Lộ trình thực thi</h4>
+            <p className="text-[10px] text-primary-500 font-bold opacity-80 uppercase tracking-widest">Execution Roadmap</p>
+          </div>
+        </div>
+        <div className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${isDark ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-emerald-50 text-emerald-600 border border-emerald-200'}`}>
+          Verified Sequence
+        </div>
+      </div>
+      <div className="p-4 space-y-3">
+        {lines.map((line, i) => {
+          const toolMatch = line.match(/\[(.*?)\]\s*(.*)/)
+          const tool = toolMatch ? toolMatch[1] : null
+          const desc = toolMatch ? toolMatch[2] : line.trim().replace(/^[\d.-]+\s*/, '')
+          const meta = tool ? TOOL_META[tool] : null
+          const ToolIcon = meta?.icon || Activity
+          
+          return (
+            <div key={i} className={`group flex items-start gap-4 p-3 rounded-2xl border transition-all duration-300 hover:scale-[1.01] ${isDark ? 'bg-white/[0.02] border-white/5 hover:bg-white/[0.04]' : 'bg-slate-50/50 border-slate-100 hover:bg-slate-50'}`}>
+              <div className="flex flex-col items-center gap-1 mt-1">
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-300 ${meta ? (isDark ? 'bg-primary-500/20 text-primary-400' : 'bg-primary-100 text-primary-600') : (isDark ? 'bg-slate-800 text-slate-500' : 'bg-slate-200 text-slate-400')}`}>
+                  <ToolIcon size={14} />
+                </div>
+                {i < lines.length - 1 && <div className={`w-0.5 h-6 rounded-full ${isDark ? 'bg-white/5' : 'bg-slate-200'}`} />}
+              </div>
+              <div className="flex-1 min-w-0">
+                {tool && (
+                  <span className={`text-[9px] font-black uppercase tracking-widest mb-1 block ${meta?.color || 'text-slate-500'}`}>
+                    Step {i+1}: {meta?.label || tool}
+                  </span>
+                )}
+                <p className={`text-[13px] leading-relaxed font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                  {desc}
+                </p>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+const ChatMarkdown = React.memo(({ content }) => {
+  const [copied, setCopied] = React.useState('')
+  const copyCode = (code) => { navigator.clipboard.writeText(code); setCopied(code); setTimeout(() => setCopied(''), 2000) }
+
+  return (
+    <ReactMarkdown 
+      remarkPlugins={[remarkGfm]} 
+      className="prose prose-sm max-w-none prose-invert"
+      components={{
+        p: ({ children }) => {
+          const text = String(children)
+          const isTree = text.includes('├──') || text.includes('└──') || text.includes('│')
+          if (isTree) {
+            return (
+              <div className="my-4 p-4 rounded-xl font-mono text-[12px] whitespace-pre overflow-x-auto bg-black/40 border border-white/5 text-primary-400/90 shadow-inner custom-scrollbar">
+                {children}
+              </div>
+            )
+          }
+          return <p className="mb-4 last:mb-0 leading-relaxed font-medium">{children}</p>
+        },
+        table: ({ children }) => (
+          <div className="my-6 overflow-x-auto rounded-[28px] border border-white/5 shadow-2xl bg-white/[0.01] backdrop-blur-xl custom-scrollbar no-scrollbar scroll-smooth">
+            <table className="w-full text-left border-collapse min-w-[400px]">
+              {children}
+            </table>
+          </div>
+        ),
+        thead: ({ children }) => (
+          <thead className="bg-white/[0.03] border-b border-white/5">
+            {children}
+          </thead>
+        ),
+        th: ({ children }) => (
+          <th className="px-6 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-primary-500 whitespace-nowrap">
+            {children}
+          </th>
+        ),
+        td: ({ children }) => (
+          <td className="px-6 py-4 text-[13px] border-b border-white/[0.01] text-slate-300 font-medium">
+            {children}
+          </td>
+        ),
+        tr: ({ children }) => (
+          <tr className="transition-all hover:bg-primary-500/[0.03] group/tr last:border-0">
+            {children}
+          </tr>
+        ),
+        code({ node, inline, className, children, ...props }) {
+          const match = /language-(\w+)/.exec(className || '')
+          const codeStr = String(children).replace(/\n$/, '')
+          if (!inline && match) {
+            return (
+              <div className="relative group my-4 scroll-mt-20">
+                <div className="flex items-center justify-between bg-[#1e1e24] border border-white/5 rounded-t-[20px] px-5 py-2.5">
+                  <span className="text-[10px] text-slate-500 font-black uppercase tracking-widest">{match[1]}</span>
+                  <button onClick={() => copyCode(codeStr)} className="text-slate-500 hover:text-white transition-all flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest">
+                    {copied === codeStr ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
+                    {copied === codeStr ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+                <SyntaxHighlighter 
+                  style={oneDark} 
+                  language={match[1]} 
+                  PreTag="div" 
+                  customStyle={{ margin: 0, padding: '20px', borderRadius: '0 0 20px 20px', border: '1px solid rgba(255,255,255,0.05)', borderTop: 'none', fontSize: '0.75rem', background: '#121217' }} 
+                  {...props}
+                >
+                  {codeStr}
+                </SyntaxHighlighter>
+              </div>
+            )
+          }
+          return <code className="bg-white/5 border border-white/5 rounded-lg px-1.5 py-0.5 text-xs font-mono text-primary-400" {...props}>{children}</code>
+        },
+      }}>{stripBase64FromText(content).trim()}</ReactMarkdown>
+  )
+})
+
+function ThinkingBlock({ thinking, isStreaming, isThinkingComplete }) {
+  const [expanded, setExpanded] = React.useState(false)
+  const showExpanded = isStreaming && !isThinkingComplete ? true : expanded
+  React.useEffect(() => { if (!isStreaming && isThinkingComplete) setExpanded(false) }, [isStreaming, isThinkingComplete])
+  if (!thinking && !isStreaming) return null
+  const cleanThinking = (thinking || '').replace(/<\/?(?:think|thought)>/gi, '').trim()
+  if (!cleanThinking && !isStreaming) return null
+
+  return (
+    <div className="mb-6 animate-fade-in group/think max-w-full">
+      <button onClick={() => setExpanded(!expanded)} className={`group flex items-center gap-3 px-4 py-2 rounded-2xl border transition-all duration-500 shadow-sm ${showExpanded ? 'bg-primary-600/10 border-primary-500/30 text-primary-300' : 'bg-slate-800/40 border-slate-800/60 text-slate-400 hover:bg-slate-800/80'}`}>
+        <div className="relative">
+          {isStreaming && !isThinkingComplete && <div className="absolute -inset-1.5 bg-primary-500/30 rounded-full animate-ping opacity-75" />}
+          <div className={`p-1.5 rounded-lg ${showExpanded ? 'bg-primary-500/20 text-primary-400' : 'bg-slate-700/50'}`}><BrainCircuit size={14} className={isStreaming && !isThinkingComplete ? 'animate-pulse' : ''} /></div>
+        </div>
+        <div className="flex flex-col items-start leading-tight">
+          <span className="text-[9px] font-black uppercase tracking-[0.15em] opacity-60">Neural Process</span>
+          <span className="text-[11px] font-bold">{isStreaming && !isThinkingComplete ? 'Đang phân tích...' : 'Lộ trình suy nghĩ'}</span>
+        </div>
+        <div className={`ml-1 transition-transform duration-500 ${showExpanded ? 'rotate-180 opacity-40' : 'opacity-20'}`}><ChevronDown size={14} /></div>
+      </button>
+      {showExpanded && (
+        <div className="relative mt-3 ml-8 p-4 bg-primary-500/[0.05] border border-primary-500/10 rounded-2xl animate-in slide-in-from-top-2">
+          <div className="prose prose-sm prose-invert max-w-none opacity-80 text-[12px] italic leading-relaxed">
+            {cleanThinking.split('\n').filter(l => l.trim()).map((line, idx) => <p key={idx} className="mb-2 last:mb-0">{line}</p>)}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ToolStep({ step, isStreaming }) {
+  const [expanded, setExpanded] = React.useState(false)
+  React.useEffect(() => { if (step.result && !isStreaming) setExpanded(false) }, [step.result, isStreaming])
+  const meta = TOOL_META[step.tool] || { icon: Zap, label: step.tool.replace('_', ' '), color: 'text-slate-400', bg: 'bg-slate-900/40 border-slate-700/30' }
+  const hasResult = !!step.result;
+  const isError = step.result?.error || (step.result?.exit_code !== 0 && step.result?.exit_code !== undefined);
+
+  return (
+    <div className={`w-full group/tool transition-all duration-300 ${expanded ? 'mb-4' : 'mb-2'}`}>
+      <div className={`relative border rounded-2xl overflow-hidden transition-all duration-300 ${meta.bg} bg-opacity-40 hover:bg-opacity-60`}>
+        <button onClick={() => setExpanded(!expanded)} className="w-full flex items-center gap-3 px-4 py-2 text-left transition-colors relative z-10">
+          <div className={`flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center ${hasResult ? (isError ? 'bg-red-500/10 text-red-500' : 'bg-emerald-500/10 text-emerald-500') : 'bg-primary-500/10 text-primary-500 animate-pulse'}`}>
+            {hasResult ? (isError ? <AlertCircle size={16} /> : <CheckCircle2 size={16} />) : <meta.icon size={16} className="animate-pulse" />}
+          </div>
+          <div className="flex-1 min-w-0">
+             <span className={`text-[9px] font-black uppercase tracking-[0.15em] ${meta.color} opacity-90`}>{meta.label}</span>
+             {(step.args?.path || step.args?.command || step.args?.query) && <p className="text-[9px] font-mono opacity-30 truncate">{step.args.path || step.args.command || step.args.query}</p>}
+          </div>
+          <ChevronDown size={14} className={`transition-transform duration-500 ${expanded ? 'rotate-180 opacity-60' : 'opacity-20'}`} />
+        </button>
+        {expanded && step.result && (
+          <div className="px-4 pb-4 animate-in slide-in-from-top-2">
+            <div className={`p-3 rounded-xl bg-black/40 text-[10px] font-mono overflow-auto max-h-[300px] custom-scrollbar ${isError ? 'text-red-400' : 'text-slate-300'}`}>
+              <pre className="whitespace-pre-wrap">{typeof step.result === 'string' ? step.result : JSON.stringify(step.result, null, 2)}</pre>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 export default function Project() {
   const { theme, toggleTheme } = useTheme()
@@ -441,8 +846,12 @@ export default function Project() {
   const handleNewChat = () => {
     setActiveSessionId(null)
     setChatMessages([])
+    setChatInput('')
+    setAttachments([])
     localStorage.removeItem('hatai_session_id')
     localStorage.removeItem('hatai_project_chat')
+    setAgentStatus(null)
+    setIsChatStreaming(false)
     setShowChat(true)
   }
 
@@ -530,7 +939,7 @@ export default function Project() {
     const fullMsg = contextPrefix + userMsg
 
     setIsChatStreaming(true)
-    setAgentStatus('🚀 Đang khởi tạo Task chạy ngầm...')
+    setAgentStatus('⚙️ Đang khởi chạy...')
     
     try {
         // Submit as a formal Background Task
@@ -543,7 +952,7 @@ export default function Project() {
         })
         
         const taskId = resp.data.id
-        if (!activeSessionId && resp.data.session_id) {
+        if (resp.data.session_id && resp.data.session_id != activeSessionId) {
             setActiveSessionId(resp.data.session_id)
             localStorage.setItem('hatai_session_id', resp.data.session_id)
         }
@@ -555,6 +964,7 @@ export default function Project() {
         setChatMessages(prev => [...prev, { role: 'assistant', content: `❌ Không thể tạo task chạy ngầm: ${err.message}` }])
     }
   }
+
 
   const messagesEndRef = useRef(null)
   useEffect(() => {
@@ -655,40 +1065,6 @@ export default function Project() {
 
   return (
     <div className={`flex h-screen overflow-hidden font-sans transition-colors duration-300 ${isDark ? 'bg-[#0a0a0c] text-white' : 'bg-light-50 text-light-900'}`}>
-          
-          {/* Main App Navigation - Hidden on mobile, Drawer style */}
-          {sidebarOpen && (
-            <div className="fixed inset-0 bg-black/60 z-[110] md:hidden backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />
-          )}
-          <aside className={`flex flex-col bg-white dark:bg-dark-900 border-r border-light-200 dark:border-slate-800/60 transition-all duration-300 ease-in-out fixed md:relative z-[120] h-full ${sidebarOpen ? 'w-60 translate-x-0' : 'w-16 -translate-x-full md:translate-x-0 md:w-16'}`}>
-            <div className="flex items-center gap-3 px-5 py-6 border-b border-light-200 dark:border-slate-800/60">
-              <div className="flex-shrink-0 w-9 h-9 bg-primary-600 rounded-xl flex items-center justify-center shadow-lg"><Bot size={20} className="text-white" /></div>
-              {sidebarOpen && <div className="min-w-0 flex-1"><p className="font-extrabold text-base tracking-tight leading-none truncate">HatAI</p><p className="text-[10px] font-bold text-primary-600 mt-1 uppercase tracking-widest truncate">Remote</p></div>}
-              <button onClick={() => setSidebarOpen(!sidebarOpen)} className="ml-auto p-1.5 text-light-400 dark:text-slate-500 hover:text-light-900 dark:hover:text-white hover:bg-light-100 dark:hover:bg-dark-800 rounded-lg">{sidebarOpen ? <X size={16}/> : <Menu size={16}/>}</button>
-            </div>
-            <div className="px-3 pt-3"><ModelStatusBadge isCollapsed={!sidebarOpen} /></div>
-            <nav className="flex-1 px-3 py-4 space-y-1.5 overflow-y-auto custom-scrollbar">
-              {NAV_ITEMS.map(({ path, label, icon: Icon }) => (
-                <Link key={path} to={path} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all font-bold text-sm ${location.pathname.startsWith(path) ? 'bg-primary-600 text-white shadow-lg' : 'text-light-500 dark:text-slate-500 hover:text-light-900 dark:hover:text-white hover:bg-light-100 dark:hover:bg-dark-800/50'}`}>
-                  <Icon size={20} className="flex-shrink-0" />
-                  {sidebarOpen && <span className="truncate">{label}</span>}
-                </Link>
-              ))}
-            </nav>
-            <div className="border-t border-light-200 dark:border-slate-800/60 p-4 space-y-2">
-              {sidebarOpen && user && <div className="px-3 py-1 mb-2"><p className="text-sm font-bold truncate">{user.username}</p></div>}
-              <div className="space-y-1">
-                <button onClick={toggleTheme} className="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-sm font-bold text-light-500 hover:bg-light-100 dark:hover:bg-dark-800/50 transition-all">
-                    {isDark ? <Sun size={18} /> : <Moon size={18} />}
-                    {sidebarOpen && <span>{isDark ? 'Chế độ sáng' : 'Chế độ tối'}</span>}
-                </button>
-                <button onClick={() => { logout(); navigate('/login'); }} className="flex items-center gap-3 w-full px-3 py-2 rounded-xl text-sm font-bold text-red-600 hover:bg-red-50 transition-all">
-                    <LogOut size={18} />
-                    {sidebarOpen && <span>Đăng xuất</span>}
-                </button>
-              </div>
-            </div>
-          </aside>
     
           {/* IDE CORE - ABSOLUTELY INDEPENDENT */}
           <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
@@ -1084,7 +1460,22 @@ export default function Project() {
                     </div>
                     <h2 className="text-[12px] md:text-[14px] font-black uppercase tracking-[0.2em] md:tracking-[0.4em] truncate">HatAI Code</h2>
                 </div>
-                <button onClick={() => setShowChat(false)} className={`p-2 rounded-xl transition-all ${isDark ? 'hover:bg-white/5 text-slate-500 hover:text-white' : 'hover:bg-black/5 text-slate-300 hover:text-black'}`}><X size={18} /></button>
+                <div className="flex items-center gap-2">
+                    <button 
+                        onClick={handleNewChat}
+                        title="Tạo đoạn chat mới"
+                        className={`p-2 rounded-xl transition-all flex items-center gap-2 border ${isDark ? 'hover:bg-primary-500/10 border-white/5 text-primary-400 hover:text-primary-300' : 'hover:bg-primary-50 border-black/5 text-primary-600'}`}
+                    >
+                        <Plus size={18} />
+                        <span className="text-[10px] font-black uppercase tracking-widest hidden md:inline">New Chat</span>
+                    </button>
+                    <button 
+                        onClick={() => setShowChat(false)} 
+                        className={`p-2 rounded-xl transition-all ${isDark ? 'hover:bg-white/5 text-slate-500 hover:text-white' : 'hover:bg-black/5 text-slate-300 hover:text-black'}`}
+                    >
+                        <X size={18} />
+                    </button>
+                </div>
             </div>
             <div className="flex-1 overflow-y-auto px-8 py-6 space-y-10 custom-scrollbar scroll-smooth" ref={chatScrollRef}>
                 {chatMessages.length === 0 ? (
@@ -1150,174 +1541,68 @@ export default function Project() {
                                         {msg.content}
                                     </div>
                                 </div>
-                            ) : (
-                                <div className="flex flex-col gap-6 w-full max-w-full pl-2">
-                                    {msg.thoughts && (
-                                        <div className={`relative p-5 rounded-3xl border transition-all duration-700 group/logic overflow-hidden ${isDark ? 'bg-amber-500/[0.02] border-amber-500/10 hover:border-amber-500/30' : 'bg-amber-50/20 border-amber-100/50 hover:border-amber-200 shadow-sm shadow-amber-900/5'}`}>
-                                            <div className="flex items-center gap-4 mb-4">
-                                                <div className="flex items-center gap-3 text-[11px] font-black uppercase tracking-[0.2em] text-amber-500/60">
-                                                    <div className="w-2 h-2 rounded-full bg-amber-600/40 animate-ping" />
-                                                    Logic Stream
-                                                </div>
-                                                <div className="flex-1 h-[1px] bg-amber-500/10" />
-                                                <div className="text-[10px] font-mono opacity-20 group-hover/logic:opacity-60 transition-opacity uppercase tracking-widest leading-none">Thinking...</div>
-                                            </div>
-                                            <div className={`text-[13px] leading-relaxed font-semibold italic font-mono space-y-2 transition-colors max-h-[160px] overflow-y-auto custom-scrollbar pr-2 ${isDark ? 'text-slate-400 group-hover/logic:text-slate-300' : 'text-slate-500 group-hover/logic:text-slate-800'}`}>
-                                                <ReactMarkdown className="prose-slate prose-invert opacity-80">{(msg.thoughts || '').replace(/<\/?(?:think|thought)>/gi, '').trim()}</ReactMarkdown>
-                                            </div>
-                                            <div className={`absolute -inset-[1px] rounded-3xl bg-gradient-to-br transition-opacity duration-700 pointer-events-none opacity-0 group-hover/logic:opacity-100 ${isDark ? 'from-amber-500/5 via-transparent to-transparent' : 'from-amber-500/5 via-transparent to-transparent'}`} />
-                                            {/* Gradient fade to indicate overflow */}
-                                            <div className={`absolute bottom-0 left-0 right-0 h-8 pointer-events-none bg-gradient-to-t ${isDark ? 'from-slate-900/20 to-transparent' : 'from-white/20 to-transparent'}`} />
-                                        </div>
-                                    )}
-
-                                    {msg.tool_calls && msg.tool_calls.map((tc, j) => (
-                                        <div key={j} className={`w-full max-w-[95%] p-5 rounded-3xl border transition-all duration-500 ${isDark ? 'bg-slate-900/40 border-white/5 hover:border-primary-500/20 shadow-inner' : 'bg-slate-50/50 border-black/5 hover:border-primary-200 shadow-sm'}`}>
-                                            <div className="flex items-center justify-between mb-4">
-                                                <div className="flex items-center gap-4">
-                                                    <div className={`w-10 h-10 rounded-2xl flex items-center justify-center transition-colors shadow-lg ${tc.result ? (isDark ? 'bg-green-500/20 text-green-500 border border-green-500/20' : 'bg-green-50 text-green-600 border border-green-200') : (isDark ? 'bg-primary-500/20 text-primary-500 border border-primary-500/20' : 'bg-primary-50 text-primary-600 border border-primary-100')}`}>
-                                                        {tc.result ? <Plus size={18} className="rotate-45" /> : <Cpu size={18} className="animate-spin-slow" />}
-                                                    </div>
-                                                    <div>
-                                                        <p className={`text-[12px] font-black uppercase tracking-[0.2em] ${tc.result ? 'text-green-500' : 'text-primary-500'}`}>{tc.tool}</p>
-                                                        <div className="flex items-center gap-2 mt-0.5">
-                                                            <div className={`w-1.5 h-1.5 rounded-full ${tc.result ? 'bg-green-500' : 'bg-primary-500 animate-pulse'}`} />
-                                                            <p className="text-[11px] opacity-40 font-mono tracking-tighter uppercase">{tc.result ? 'Protocol Executed' : 'Processing Request...'}</p>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                {!tc.result && <div className="flex gap-1.5 px-3 py-1 bg-primary-500/10 rounded-full"><div className="w-1 h-1 bg-primary-500 rounded-full animate-bounce [animation-duration:0.8s]" /><div className="w-1 h-1 bg-primary-500 rounded-full animate-bounce [animation-duration:0.8s] [animation-delay:0.2s]" /><div className="w-1 h-1 bg-primary-500 rounded-full animate-bounce [animation-duration:0.8s] [animation-delay:0.4s]" /></div>}
-                                            </div>
-                                            {tc.args && (
-                                                <div className={`p-4 rounded-2xl font-mono text-[12px] overflow-x-auto whitespace-pre custom-scrollbar-h ${isDark ? 'bg-black/60 text-slate-400 border border-white/5' : 'bg-white border border-black/[0.03] shadow-inner text-slate-500'}`}>
-                                                    <span className="opacity-30 mr-2">$ {tc.tool}_params </span>
-                                                    {JSON.stringify(tc.args, null, 2)}
-                                                </div>
-                                            )}
-                                            {tc.result && tc.result.results && (
-                                                <div className="mt-4 grid grid-cols-1 gap-3">
-                                                    {tc.result.results.map((r, k) => {
-                                                        let hostname = 'Web'
-                                                        try { if(r.url) hostname = new URL(r.url).hostname.replace('www.', '') } catch { }
-                                                        return (
-                                                            <div key={k} className={`group/res bg-white/40 dark:bg-black/40 p-4 rounded-2xl border ${isDark ? 'border-white/5 hover:border-primary-500/30' : 'border-black/5 hover:border-primary-500/20'} transition-all relative overflow-hidden`}>
-                                                                <div className="flex items-center justify-between mb-2">
-                                                                    <div className="flex items-center gap-2">
-                                                                        <div className="w-7 h-7 rounded-lg bg-primary-500/10 flex items-center justify-center text-primary-500">
-                                                                            <Globe size={14} />
-                                                                        </div>
-                                                                        <div>
-                                                                            <p className="text-[9px] text-primary-500 font-black uppercase tracking-[0.2em] leading-none mb-0.5">{hostname}</p>
-                                                                            <h4 className="text-[12px] font-bold truncate max-w-[220px] md:max-w-md">{r.title}</h4>
-                                                                        </div>
-                                                                    </div>
-                                                                    <a href={r.url} target="_blank" rel="noopener noreferrer" className="p-1.5 opacity-40 hover:opacity-100 transition-opacity">
-                                                                        <ExternalLink size={12} />
-                                                                    </a>
-                                                                </div>
-                                                                <p className="text-[11px] opacity-60 line-clamp-2 leading-relaxed">{r.snippet || r.content?.substring(0, 120)}</p>
-                                                                
-                                                                {r.content && (
-                                                                    <details className="mt-2 group/det">
-                                                                        <summary className="list-none cursor-pointer text-[9px] font-black uppercase tracking-[0.15em] opacity-30 hover:opacity-70 transition-opacity flex items-center gap-1.5">
-                                                                            <ChevronRight size={10} className="group-open/det:rotate-90 transition-transform" />
-                                                                            Intel Data
-                                                                        </summary>
-                                                                        <div className="mt-2 p-3 bg-black/20 rounded-xl text-[10px] opacity-50 font-medium leading-relaxed max-h-32 overflow-y-auto custom-scrollbar whitespace-pre-wrap italic">
-                                                                            {r.content}
-                                                                        </div>
-                                                                    </details>
-                                                                )}
-                                                            </div>
-                                                        )
-                                                    })}
-                                                </div>
-                                            )}
-
-                                            {tc.result && tc.result.error && (
-                                                <div className="mt-3 p-4 rounded-2xl bg-red-500/5 border border-red-500/10 text-red-500 text-[11px] font-bold flex items-center gap-3 shadow-lg shadow-red-900/10">
-                                                    <X size={14} className="shrink-0" />
-                                                    <span>EXECUTION_FAILURE: {tc.result.error}</span>
-                                                </div>
-                                            )}
-                                        </div>
-                                    ))}
-
-                                    {msg.screenshots && msg.screenshots.length > 0 && (
-                                        <div className="flex flex-wrap gap-5 py-2">
-                                            {msg.screenshots.map((s, j) => (
-                                                <div key={j} className="group relative overflow-hidden rounded-3xl border border-white/5 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.8)] transition-all duration-500 hover:scale-[1.02] hover:rotate-1">
-                                                    <img src={s} alt="Workspace Result" className="max-w-[440px] h-auto object-contain cursor-zoom-in brightness-90 group-hover:brightness-110 transition-all" />
-                                                    <div className="absolute top-6 left-6 px-4 py-2 bg-black/60 backdrop-blur-xl rounded-2xl text-[10px] text-white flex items-center gap-3 font-black uppercase tracking-[0.2em] border border-white/10 group-hover:border-primary-500/50 shadow-2xl transition-all">
-                                                        <Monitor size={14} className="text-primary-500 animate-pulse" /> Live Workspace Result
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-
-                                    {msg.content && (
-                                        <div className={`prose prose-sm max-w-none prose-p:leading-relaxed prose-p:text-[15px] prose-p:mb-4 last:prose-p:mb-0 prose-strong:text-amber-500 prose-headings:font-black prose-headings:uppercase prose-headings:tracking-[0.2em] prose-headings:text-primary-500/80 transition-colors ${isDark ? 'prose-invert text-slate-300' : 'text-slate-700 font-medium'}`}>
-                                            <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
-                                                p({children}) {
-                                                    const text = String(children);
-                                                    const isTree = text.includes('├──') || text.includes('└──') || text.includes('│');
-                                                    if (isTree) {
-                                                        return (
-                                                            <div className={`my-6 p-6 rounded-[28px] font-mono text-[13px] whitespace-pre overflow-x-auto border transition-all ${isDark ? 'bg-black/40 border-white/5 text-primary-400/90 shadow-inner' : 'bg-slate-50 border-black/5 text-slate-700 shadow-sm'}`}>
-                                                                {children}
-                                                            </div>
-                                                        );
-                                                    }
-                                                    return <p className="mb-4 last:mb-0 leading-relaxed text-[15px]">{children}</p>;
-                                                },
-                                                code({node, inline, className, children, ...props}) {
-                                                    const match = /language-(\w+)/.exec(className || '')
-                                                    if (!inline && match && match[1] === 'tool') {
-                                                        try {
-                                                            const toolData = JSON.parse(String(children));
-                                                            const toolName = toolData.tool || toolData.action || 'Unknown Protocol';
-                                                            // Support both flattened and nested 'args' format
-                                                            const args = toolData.args || toolData;
-                                                            const toolTarget = args.path || args.target || args.command || args.query || toolData.path || toolData.target || '';
-                                                            
-                                                            return (
-                                                                <div className={`my-4 p-4 rounded-3xl border flex items-center gap-4 transition-all hover:scale-[1.01] ${isDark ? 'bg-primary-500/5 border-primary-500/20 shadow-xl shadow-black/40' : 'bg-primary-50/30 border-primary-100 shadow-sm'}`}>
-                                                                    <div className="w-10 h-10 rounded-2xl bg-primary-600 flex items-center justify-center text-white shadow-xl shadow-primary-600/30">
-                                                                        <Cpu size={18} className="animate-spin-slow" />
-                                                                    </div>
-                                                                    <div className="flex flex-col flex-1 min-w-0">
-                                                                        <span className="text-[10px] font-black uppercase tracking-[0.25em] text-primary-500 opacity-60">Neural Protocol</span>
-                                                                        <span className="text-[13px] font-bold flex items-center gap-2">
-                                                                            {toolName} 
-                                                                            {toolTarget && <span className="opacity-30 font-mono text-[11px] font-medium tracking-tighter truncate max-w-full">→ {toolTarget}</span>}
-                                                                        </span>
-                                                                    </div>
-                                                                </div>
-                                                            );
-                                                        } catch (e) {
-                                                            // Fallback to normal code block
+                                ) : (
+                                    <div className="flex flex-col gap-4 w-full max-w-full pl-2">
+                                        {(() => {
+                                            const events = parseEventsFromContent(msg.content)
+                                            const toolCallCounters = {}
+                                            const thinkingContent = msg.thoughts || events.filter(e => e.type === 'thinking').map(e => e.content).join('\n\n')
+                                            const results = events.filter(e => e.type !== 'thinking')
+                                            
+                                            return (
+                                                <>
+                                                    {(thinkingContent || (isChatStreaming && (i === chatMessages.length - 1))) && (
+                                                        <ThinkingBlock
+                                                            thinking={thinkingContent}
+                                                            isStreaming={isChatStreaming && (i === chatMessages.length - 1)}
+                                                            isThinkingComplete={!isChatStreaming}
+                                                        />
+                                                    )}
+                                                    {results.map((item, idx) => {
+                                                        if (item.type === 'tool_call') {
+                                                            const callIdx = toolCallCounters[item.tool] ?? 0
+                                                            toolCallCounters[item.tool] = callIdx + 1
+                                                            const resultEv = events.find(e => {
+                                                                if (e.type !== 'tool_result' || e.tool !== item.tool) return false
+                                                                return events.filter(res => res.type === 'tool_result' && res.tool === item.tool).indexOf(e) === callIdx
+                                                            })
+                                                            return <ToolStep key={idx} step={{ tool: item.tool, args: item.args, result: resultEv?.result }} isStreaming={isChatStreaming && (i === chatMessages.length - 1)} />
                                                         }
-                                                    }
-                                                    return !inline && match ? (
-                                                        <div className="relative group/code mt-8 mb-8 rounded-[30px] overflow-hidden border border-white/5 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.5)]">
-                                                            <div className="absolute top-0 right-0 px-5 py-2 bg-white/5 backdrop-blur-3xl text-[10px] font-black uppercase tracking-[0.3em] opacity-40 z-10 border-b border-l border-white/5 transition-opacity group-hover/code:opacity-100">{match[1]}</div>
-                                                            <SyntaxHighlighter style={isDark ? vscDarkPlus : oneLight} language={match[1]} PreTag="div" className="!m-0 !p-8 !text-[14px] !bg-transparent custom-scrollbar" {...props}>
-                                                                {String(children).replace(/\n$/, '')}
-                                                            </SyntaxHighlighter>
-                                                        </div>
-                                                    ) : (
-                                                        <code className={`px-2 py-0.5 rounded-lg font-black transition-colors ${isDark ? 'bg-white/5 text-primary-400 group-hover/code:text-primary-300' : 'bg-black/5 text-primary-600'}`} {...props}>{children}</code>
-                                                    )
-                                                }
-                                            }}>{msg.content.replace(/<(think|thought)>[\s\S]*?<\/\1>/gi, '').trim()}</ReactMarkdown>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-                    ))
-                )}
+                                                        if (item.type === 'text') {
+                                                            return (
+                                                                <div key={idx} className={`prose prose-sm max-w-none prose-p:leading-relaxed prose-p:text-[14px] prose-p:mb-4 last:prose-p:mb-0 transition-colors ${isDark ? 'prose-invert text-slate-300' : 'text-slate-700'}`}>
+                                                                    <ChatMarkdown content={item.content} />
+                                                                </div>
+                                                            )
+                                                        }
+                                                        if (item.type === 'step') {
+                                                            return (
+                                                                <div key={idx} className={`flex items-center gap-3 px-4 py-3 mb-6 rounded-2xl border animate-fade-in ${isDark ? 'bg-primary-500/10 border-primary-500/20 text-primary-400' : 'bg-primary-50 border-primary-200 text-primary-700'}`}>
+                                                                    <div className="p-1.5 bg-primary-500/20 rounded-lg"><Activity size={14} className="animate-pulse" /></div>
+                                                                    <span className="text-[11px] font-black uppercase tracking-widest leading-none">{item.content}</span>
+                                                                </div>
+                                                            )
+                                                        }
+                                                        if (item.type === 'plan') {
+                                                            return <Roadmap key={idx} content={item.content} isDark={isDark} />
+                                                        }
+                                                        if (item.type === 'screenshot') {
+                                                            return (
+                                                                <div key={idx} className="group relative overflow-hidden rounded-2xl border border-white/5 shadow-2xl mb-4">
+                                                                    <img src={item.url} alt="Result" className="w-full h-auto object-contain brightness-90 group-hover:brightness-110" />
+                                                                </div>
+                                                            )
+                                                        }
+                                                        return null
+                                                    })}
+                                                </>
+                                            )
+                                        })()}
+                                    </div>
+                                )}
+                            </div>
+                        ))
+                    )}
                 
                 {agentStatus && (
                     <div className="flex items-center gap-4 px-6 py-3 rounded-full border border-primary-500/20 bg-primary-500/5 text-primary-500 text-[11px] font-black uppercase tracking-[0.2em] w-fit animate-pulse shadow-2xl shadow-primary-900/20 backdrop-blur-xl border-l-[3px] border-primary-500">

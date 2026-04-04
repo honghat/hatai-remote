@@ -166,7 +166,6 @@ export default function Tasks() {
 
   const handleCancelTask = async (id, e) => {
     e.stopPropagation()
-    if (!confirm('Bạn có chắc muốn huỷ task này?')) return
     try {
       await api.post(`/tasks/${id}/cancel`)
       fetchTasks()
@@ -177,7 +176,6 @@ export default function Tasks() {
 
   const handleDeleteTask = async (id, e) => {
     e.stopPropagation()
-    if (!confirm('Bạn có chắc muốn xoá hoàn toàn task này?')) return
     try {
       await api.delete(`/tasks/${id}`)
       setTasks(prev => prev.filter(t => t.id !== id))
@@ -200,7 +198,6 @@ export default function Tasks() {
 
   const handleDeleteAllTasks = async () => {
     if (tasks.length === 0) return
-    if (!confirm('Bạn có chắc muốn xoá TOÀN BỘ danh sách task? Các task đang chạy cũng sẽ bị dừng lại.')) return
     
     try {
       await api.delete('/tasks')

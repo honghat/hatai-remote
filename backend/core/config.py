@@ -38,10 +38,13 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:4b")
 
 # LLM Model - OpenAI Compatible API (llama-cpp server)
 OPENAI_API_BASE = os.getenv("OPENAI_API_BASE", "http://100.69.50.64:8080/v1")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "sk-no-key")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "qwen3-4b")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
+# LLM Model — DeepSeek API (OpenAI Compatible)
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
-# Active LLM provider: "local" (Qwen), "gemini", "ollama", or "openai"
+# Active LLM provider: "local" (Qwen), "gemini", "ollama", "openai", or "deepseek"
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai")
 
 # CORS

@@ -32,6 +32,11 @@ def create_task(
     svc = ChatService(db)
     
     session_id = data.session_id
+    if session_id:
+        # Verify the session actually exists in DB to prevent IntegrityError
+        if not svc.get_session(session_id, user_id):
+            session_id = None
+
     if not session_id:
         title = f"🤖 {data.prompt[:45]}"
         session = svc.create_session(user_id, ChatSessionCreate(title=title))
@@ -56,7 +61,8 @@ def create_task(
         prompt=data.prompt, 
         session_id=session_id,
         temperature=data.temperature,
-        max_tokens=data.max_tokens
+        max_tokens=data.max_tokens,
+        attachments=data.attachments
     )
 
     # Update state to running

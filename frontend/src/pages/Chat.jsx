@@ -12,7 +12,8 @@ import {
   Settings2, Brain, Sparkles, BrainCircuit,
   Zap, Terminal, FileText, FolderOpen, Camera,
   BookOpen, CheckCircle2, AlertCircle, Globe, ExternalLink, Square,
-  Wifi, WifiOff, Pause, Play, History
+  Wifi, WifiOff, Pause, Play, History, ListChecks, Activity, Eye, Layout, Search,
+  Image as ImageIcon, AtSign, SquareSlash, Link2
 } from 'lucide-react'
 
 // ── Parse events from formatted string ────────────────────────────────
@@ -39,20 +40,46 @@ function stripBase64FromText(text) {
   return text.replace(/(?:data:image\/[^;]+;base64,)?[A-Za-z0-9+/]{500,}={0,2}/g, '[image data removed]');
 }
 
+function cleanLLMArtifacts(text) {
+  if (!text) return text;
+  return text
+    .replace(/^[\}\s\n]*```[a-zA-Z0-9_#-]*\s*/, "") 
+    .replace(/```\s*$/, "")
+    .replace(/^[\}\s\n]+/, "")
+    .replace(/^\{\s*"$/, "")
+    .replace(/<\/?(?:tool|task|think|thought)>/gi, "")
+    .trim();
+}
+
+// Loose JSON parser for malformed LLM outputs
+function looseJsonParse(text) {
+  if (!text) return null;
+  text = text.trim();
+  try { return JSON.parse(text); } catch {
+    try {
+      const fixed = text.replace(/(['"])?([a-z0-9A-Z_]+)(['"])?\s*:\s*/g, '"$2": ');
+      return JSON.parse(fixed);
+    } catch {
+      const toolMatch = text.match(/"tool"\s*:\s*"([^"]+)"/);
+      if (toolMatch) {
+         const tool = toolMatch[1];
+         const args = {};
+         const kvMatches = text.matchAll(/"([^"]+)"\s*:\s*"([^"]+)"/g);
+         for (const m of kvMatches) if (m[1] !== 'tool') args[m[1]] = m[2];
+         return { tool, args };
+      }
+    }
+  }
+  return null;
+}
+
 function parseEventsFromContent(content) {
   if (!content || typeof content !== 'string') return [];
 
   const events = [];
   let lastIndex = 0;
 
-  // Cải tiến Regex để bắt được cả những tool call "nát" hoặc dính liền
-  // 1. Thinking block: <think>...</think>
-  // 2. Tool call: 🔧 **tool**(JSON)
-  // 3. Tool result: 📤 **Result (tool)**: JSON
-  // 4. Screenshot: 📸 Screenshot: path
-  // 5. Error: ❌ **Error**: content
-  // 6. Markdown tool block: ```tool ... ```
-  const blockRegex = /(<(?:think|thought)>[\s\S]*?<\/(?:think|thought)>)|(🔧 \*\*.*?\*\*\(.*?\))|(📤 \*\*Result \(.*?\)\*\*: [\s\S]*?(?=\n?🔧|\n?📤 \*\*Result|\n?📸|\n?❌|$))|(\n?📸 Screenshot: .*?(?=\n|$))|(\n?❌ \*\*Error\*\*: .*?(?=\n|$))|(\n?```tool\s*\n?([\s\S]*?)\n?```)/gs;
+  const blockRegex = /(<(?:think|thought|tool|task)>[\s\S]*?<\/(?:think|thought|tool|task)>)|(🔧 \*\*.*?\*\*\(.*?\))|(📤 \*\*Result \(.*?\)\*\*: [\s\S]*?)(?=\n\n|\s*🔧|\s*📤 \*\*Result|\s*📸|\s*❌|$)|(\n?📸 Screenshot: .*?(?=\n|$))|(\n?❌ \*\*Error\*\*: .*?(?=\n|$))|(\n?```tool\s*\n?([\s\S]*?)\n?```)|(tool\s*\{[\s\S]*?\}(?=\s*(?:```|\n|$))|\{\s*"tool"\s*:[\s\S]*?\}(?=\s*(?:```|\n|$)))|(\[(?:read_file|list_dir|project_tree|search_code|edit_file|multi_edit_file|write_file|deep_search|run_command|sys_key|sys_click|browser_go|browser_read|screenshot)\]\s*.*?(?=\n|$))|(📋\s*KẾ\s*HOẠCH:[\s\S]*?)(?=\n\n|\s*🔧|\s*📤 \*\*Result|\s*📸|\s*❌|$)/gs;
 
   let match;
   while ((match = blockRegex.exec(content)) !== null) {
@@ -60,7 +87,7 @@ function parseEventsFromContent(content) {
 
     // Text part before block
     if (start > lastIndex) {
-      const textPart = stripBase64FromText(content.slice(lastIndex, start).trim());
+      const textPart = cleanLLMArtifacts(stripBase64FromText(content.slice(lastIndex, start).trim()));
       if (textPart && textPart !== '[image data removed]') {
         const { thinking, answer } = parseThinking(textPart);
         if (thinking) events.push({ type: 'thinking', content: thinking });
@@ -69,9 +96,24 @@ function parseEventsFromContent(content) {
       }
     }
 
-    if (match[1]) { // <think>
-      const inner = match[1].match(/<(?:think|thought)>([\s\S]*?)(?:<\/(?:think|thought)>|$)/i);
-      if (inner?.[1]) events.push({ type: 'thinking', content: inner[1].trim() });
+    if (match[1]) { // <think>, <tool>, <task>
+      const tagMatch = match[1].match(/<(think|thought|tool|task)>([\s\S]*?)<\/\1>/i);
+      if (tagMatch) {
+        const tag = tagMatch[1].toLowerCase();
+        const inner = tagMatch[2].trim();
+        if (tag === 'think' || tag === 'thought') {
+          events.push({ type: 'thinking', content: inner });
+        } else if (tag === 'tool' || tag === 'task') {
+          try {
+            const data = JSON.parse(inner);
+            if (data.tool) events.push({ type: 'tool_call', tool: data.tool, args: data.args || data });
+            else if (data.task) events.push({ type: 'text', content: `🎯 Task: ${data.task}` });
+          } catch {
+            // Not JSON, treat as text but hide tags
+            if (inner) events.push({ type: 'text', content: inner });
+          }
+        }
+      }
     }
     else if (match[2]) { // 🔧 **tool**(JSON)
       const toolMatch = match[2].match(/🔧 \*\*(.*?)\*\*\((.*?)\)/s);
@@ -124,12 +166,19 @@ function parseEventsFromContent(content) {
       events.push({ type: 'error', content: errorText });
     }
     else if (match[6]) { // ```tool ... ```
-      try {
-        const data = JSON.parse(match[7]);
-        if (data.tool) events.push({ type: 'tool_call', tool: data.tool, args: data.args || data });
-      } catch {
-        events.push({ type: 'text', content: match[6] });
-      }
+      const toolData = looseJsonParse(match[7]);
+      if (toolData?.tool) {
+        events.push({ type: 'tool_call', tool: toolData.tool, args: toolData.args || toolData });
+      } else { events.push({ type: 'text', content: match[6] }); }
+    } else if (match[8]) {
+      const toolData = looseJsonParse(match[8].replace(/^tool\s*/, ''));
+      if (toolData?.tool) {
+        events.push({ type: 'tool_call', tool: toolData.tool, args: toolData.args || toolData });
+      } else { events.push({ type: 'text', content: match[8] }); }
+    } else if (match[9]) {
+      events.push({ type: 'step', content: match[9].trim() });
+    } else if (match[10]) {
+      events.push({ type: 'plan', content: match[10].trim() });
     }
 
     lastIndex = blockRegex.lastIndex;
@@ -137,7 +186,9 @@ function parseEventsFromContent(content) {
 
   // Handle remaining text
   if (lastIndex < content.length) {
-    const remaining = stripBase64FromText(content.slice(lastIndex).trim());
+    const raw = content.slice(lastIndex).trim();
+    const remaining = cleanLLMArtifacts(stripBase64FromText(raw));
+    
     if (remaining && remaining !== '[image data removed]') {
       const { thinking, answer } = parseThinking(remaining);
       if (thinking) events.push({ type: 'thinking', content: thinking });
@@ -205,8 +256,16 @@ function parseThinking(content) {
   };
 }
 function ThinkingBlock({ thinking, isStreaming, isThinkingComplete }) {
-  const [expanded, setExpanded] = useState(true)
+  const [expanded, setExpanded] = useState(false)
+  
+  // Tự động mở khi đang suy nghĩ, và thu gọn khi xong
   const showExpanded = isStreaming && !isThinkingComplete ? true : expanded
+
+  useEffect(() => {
+    if (!isStreaming && isThinkingComplete) {
+      setExpanded(false)
+    }
+  }, [isStreaming, isThinkingComplete])
 
   if (!thinking && !isStreaming) return null
   const cleanThinking = (thinking || '').replace(/<\/?(?:think|thought)>/gi, '').trim()
@@ -314,6 +373,45 @@ const ChatMarkdown = memo(function ChatMarkdown({ content }) {
     <ReactMarkdown className="chat-markdown-content text-sm leading-relaxed font-medium"
       remarkPlugins={[remarkGfm]}
       components={{
+        p: ({ children }) => {
+          const text = String(children)
+          const isTree = text.includes('├──') || text.includes('└──') || text.includes('│')
+          if (isTree) {
+            return (
+              <div className="my-4 p-4 rounded-xl font-mono text-[12px] whitespace-pre overflow-x-auto bg-black/40 border border-white/5 text-primary-400/90 shadow-inner custom-scrollbar">
+                {children}
+              </div>
+            )
+          }
+          return <p className="mb-4 last:mb-0 leading-relaxed">{children}</p>
+        },
+        table: ({ children }) => (
+          <div className="my-6 overflow-x-auto rounded-[28px] border border-light-200 dark:border-white/5 shadow-2xl bg-white/[0.01] backdrop-blur-xl custom-scrollbar no-scrollbar scroll-smooth">
+            <table className="w-full text-left border-collapse min-w-[400px]">
+              {children}
+            </table>
+          </div>
+        ),
+        thead: ({ children }) => (
+          <thead className="bg-[#f8f9fa] dark:bg-white/[0.03] border-b border-light-200 dark:border-white/5">
+            {children}
+          </thead>
+        ),
+        th: ({ children }) => (
+          <th className="px-6 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-primary-500 whitespace-nowrap">
+            {children}
+          </th>
+        ),
+        td: ({ children }) => (
+          <td className="px-6 py-4 text-[13px] border-b border-light-100 dark:border-white/[0.01] text-light-900 dark:text-slate-300 font-medium">
+            {children}
+          </td>
+        ),
+        tr: ({ children }) => (
+          <tr className="transition-all hover:bg-primary-500/[0.03] group/tr last:border-0">
+            {children}
+          </tr>
+        ),
         code({ node, inline, className, children, ...props }) {
           const match = /language-(\w+)/.exec(className || '')
           const codeStr = String(children).replace(/\n$/, '')
@@ -330,7 +428,7 @@ const ChatMarkdown = memo(function ChatMarkdown({ content }) {
                   </button>
                 </div>
                 <SyntaxHighlighter style={oneDark} language={match[1]} PreTag="div"
-                  customStyle={{ margin: 0, borderRadius: '0 0 0.75rem 0.75rem', border: '1px solid', borderColor: 'inherit', borderTop: 'none', fontSize: '0.8rem' }}
+                  customStyle={{ margin: 0, borderRadius: '0 0 0.75rem 0.75rem', border: '1px solid', borderColor: 'inherit', borderTop: 'none', fontSize: '0.75rem' }}
                   className="border-light-300 dark:border-dark-800"
                   {...props}>{codeStr}</SyntaxHighlighter>
               </div>
@@ -339,28 +437,94 @@ const ChatMarkdown = memo(function ChatMarkdown({ content }) {
           return <code className="bg-light-200 dark:bg-dark-950 border border-light-300 dark:border-dark-800 rounded px-1.5 py-0.5 text-xs font-mono text-primary-600 dark:text-primary-300" {...props}>{children}</code>
         },
       }}
-    >{content}</ReactMarkdown>
+    >{stripBase64FromText(content).trim()}</ReactMarkdown>
   )
 })
 
 // ── Tool Step ───────────────────────────────────────────────────────────────
 const TOOL_META = {
-  run_command: { icon: Terminal, label: 'Shell', color: 'text-emerald-400', bg: 'bg-emerald-900/20 border-emerald-700/30' },
-  read_file: { icon: FileText, label: 'Đọc File', color: 'text-blue-400', bg: 'bg-blue-900/20 border-blue-700/30' },
-  write_file: { icon: FileText, label: 'Ghi File', color: 'text-purple-400', bg: 'bg-purple-900/20 border-purple-700/30' },
-  list_dir: { icon: FolderOpen, label: 'Thư mục', color: 'text-yellow-400', bg: 'bg-yellow-900/20 border-yellow-700/30' },
-  screenshot: { icon: Camera, label: 'Screenshot', color: 'text-pink-400', bg: 'bg-pink-900/20 border-pink-700/30' },
-  update_docs: { icon: BookOpen, label: 'Cập nhật Docs', color: 'text-cyan-400', bg: 'bg-cyan-900/20 border-cyan-700/30' },
-  deep_search: { icon: Globe, label: 'Deep Search', color: 'text-orange-400', bg: 'bg-orange-900/20 border-orange-700/30' },
-  web_search: { icon: Globe, label: 'Tìm kiếm Web', color: 'text-orange-400', bg: 'bg-orange-900/20 border-orange-700/30' },
-  read_web: { icon: Globe, label: 'Đọc trang Web', color: 'text-teal-400', bg: 'bg-teal-900/20 border-teal-700/30' },
-  edit_file: { icon: FileText, label: 'Sửa File', color: 'text-amber-400', bg: 'bg-amber-900/20 border-amber-700/30' },
-  search_code: { icon: Terminal, label: 'Tìm Code', color: 'text-violet-400', bg: 'bg-violet-900/20 border-violet-700/30' },
-  find_files: { icon: FolderOpen, label: 'Tìm File', color: 'text-lime-400', bg: 'bg-lime-900/20 border-lime-700/30' },
+  run_command: { icon: Terminal, label: 'Thực thi Shell', color: 'text-emerald-400', bg: 'bg-emerald-900/20' },
+  read_file: { icon: FileText, label: 'Đọc tệp tin', color: 'text-blue-400', bg: 'bg-blue-900/20' },
+  write_file: { icon: FileText, label: 'Khởi tạo tệp tin', color: 'text-purple-400', bg: 'bg-purple-900/20' },
+  list_dir: { icon: FolderOpen, label: 'Duyệt thư mục', color: 'text-yellow-400', bg: 'bg-yellow-900/20' },
+  screenshot: { icon: Camera, label: 'Ảnh chụp màn hình', color: 'text-pink-400', bg: 'bg-pink-900/20' },
+  update_docs: { icon: BookOpen, label: 'Cơ sở kiến thức', color: 'text-cyan-400', bg: 'bg-cyan-900/20' },
+  deep_search: { icon: Search, label: 'Truy vấn chuyên sâu', color: 'text-orange-400', bg: 'bg-orange-900/20' },
+  web_search: { icon: Globe, label: 'Tra cứu thông tin', color: 'text-orange-400', bg: 'bg-orange-900/20' },
+  read_web: { icon: Eye, label: 'Trích xuất Web', color: 'text-teal-400', bg: 'bg-teal-900/20' },
+  edit_file: { icon: FileText, label: 'Cấu trúc lại tệp', color: 'text-amber-400', bg: 'bg-amber-900/20' },
+  search_code: { icon: Terminal, label: 'Truy vấn mã nguồn', color: 'text-violet-400', bg: 'bg-violet-900/20' },
+  find_files: { icon: FolderOpen, label: 'Định vị tệp tin', color: 'text-lime-400', bg: 'bg-lime-900/20' },
+  browser_go: { icon: Globe, label: 'Điều hướng URL', color: 'text-indigo-400', bg: 'bg-indigo-900/20' },
+  browser_read: { icon: Eye, label: 'Phân tích DOM', color: 'text-sky-400', bg: 'bg-sky-900/20' },
+  sys_stats: { icon: Activity, label: 'Phân tích hệ thống', color: 'text-emerald-400', bg: 'bg-emerald-900/20' },
+  project_tree: { icon: Layout, label: 'Kiến trúc dự án', color: 'text-blue-500', bg: 'bg-blue-900/20' },
+  git_ops: { icon: History, label: 'Quản trị Git', color: 'text-pink-500', bg: 'bg-pink-900/20' },
+  analyze_document: { icon: FileText, label: 'Phân tích tài liệu', color: 'text-indigo-500', bg: 'bg-indigo-900/20' },
 }
 
-const ToolStep = memo(function ToolStep({ step }) {
+// ── Roadmap ─────────────────────────────────────────────────────────────────
+function Roadmap({ content, isDark }) {
+  const lines = content.split('\n').filter(l => l.trim() && !l.includes('KẾ HOẠCH'))
+  return (
+    <div className={`my-6 overflow-hidden rounded-[28px] border transition-all duration-500 shadow-2xl relative ${isDark ? 'bg-slate-900/40 border-white/10 shadow-primary-500/5 backdrop-blur-xl' : 'bg-white border-slate-200 shadow-slate-200/50'}`}>
+      <div className={`px-8 py-5 border-b flex items-center justify-between relative overflow-hidden ${isDark ? 'border-white/10' : 'bg-slate-50/50 border-slate-200'}`}>
+        {isDark && <div className="absolute inset-0 bg-gradient-to-r from-primary-600/10 via-transparent to-transparent opacity-50" />}
+        <div className="flex items-center gap-4 relative z-10">
+          <div className="p-2.5 bg-primary-500/20 rounded-2xl text-primary-400 shadow-[0_0_15px_rgba(59,130,246,0.2)]"><ListChecks size={20} /></div>
+          <div>
+            <h4 className={`text-[15px] font-black uppercase tracking-[0.15em] ${isDark ? 'text-white' : 'text-slate-900'}`}>Lộ trình thực thi</h4>
+            <p className="text-[10px] text-primary-500 font-black uppercase tracking-[0.2em] opacity-80">Autonomous Logic Workflow</p>
+          </div>
+        </div>
+        <div className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest relative z-10 ${isDark ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-emerald-50 text-emerald-600 border border-emerald-200'}`}>
+          Verified Path
+        </div>
+      </div>
+      <div className="p-4 space-y-3">
+        {lines.map((line, i) => {
+          const toolMatch = line.match(/\[(.*?)\]\s*(.*)/)
+          const tool = toolMatch ? toolMatch[1] : null
+          const desc = toolMatch ? toolMatch[2] : line.trim().replace(/^[\d.-]+\s*/, '')
+          const meta = tool ? TOOL_META[tool] : null
+          const ToolIcon = meta?.icon || Zap
+          
+          return (
+            <div key={i} className={`group flex items-start gap-4 p-3 rounded-2xl border transition-all duration-300 hover:scale-[1.01] ${isDark ? 'bg-white/[0.02] border-white/5 hover:bg-white/[0.04]' : 'bg-slate-50/50 border-slate-100 hover:bg-slate-50'}`}>
+              <div className="flex flex-col items-center gap-1 mt-1">
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-300 ${meta ? (isDark ? 'bg-primary-500/20 text-primary-400' : 'bg-primary-100 text-primary-600') : (isDark ? 'bg-slate-800 text-slate-500' : 'bg-slate-200 text-slate-400')}`}>
+                  <ToolIcon size={14} />
+                </div>
+                {i < lines.length - 1 && <div className={`w-0.5 h-6 rounded-full ${isDark ? 'bg-white/5' : 'bg-slate-200'}`} />}
+              </div>
+              <div className="flex-1 min-w-0">
+                {tool && (
+                  <span className={`text-[9px] font-black uppercase tracking-widest mb-1 block ${meta?.color || 'text-slate-500'}`}>
+                    Step {i+1}: {meta?.label || tool}
+                  </span>
+                )}
+                <p className={`text-[13px] leading-relaxed font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                  {desc}
+                </p>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+const ToolStep = memo(function ToolStep({ step, isStreaming }) {
   const [expanded, setExpanded] = useState(false)
+  
+  // Auto-collapse when task is done or result is received
+  useEffect(() => {
+    if (step.result && !isStreaming) {
+      setExpanded(false)
+    }
+  }, [step.result, isStreaming])
+
   const meta = TOOL_META[step.tool] || { icon: Zap, label: step.tool.replace('_', ' '), color: 'text-slate-400', bg: 'bg-light-100 dark:bg-slate-900/40 border-light-200 dark:border-slate-700/30' }
   const Icon = meta.icon
 
@@ -588,28 +752,38 @@ function AgentMessage({ events, isStreaming }) {
     const others = []
     let isThinkingStreaming = false
 
-    // Pre-scan for a final consolidated 'thinking' event which is the source of truth
-    const finalThinkingEv = events.find(e => e.type === 'thinking')
-    if (finalThinkingEv) {
-      thoughts.push(finalThinkingEv.content.replace(/<\/?(?:think|thought)>/gi, '').trim())
-    }
-
     events.forEach((ev, idx) => {
       const isLast = idx === events.length - 1
-      let contentToProcess = ""
-      let markAsStreaming = false
 
-      // If we already have a final thinking event, ignore thinking_tokens to avoid duplication
-      if (ev.type === 'thinking_token' && !finalThinkingEv) {
-        contentToProcess = ev.content || ""
-        markAsStreaming = isStreaming && isLast
-      } else if (ev.type === 'text') {
-        const { thinking, answer, isThinkingComplete } = parseThinking(ev.content)
-        // Only process thinking from text if we don't have a better event
-        if (thinking && !finalThinkingEv) {
-          contentToProcess = thinking
-          markAsStreaming = isStreaming && isLast && !isThinkingComplete
+      if (ev.type === 'thinking') {
+        const clean = ev.content.replace(/<\/?(?:think|thought)>/gi, '').trim()
+        if (clean && !thoughts.includes(clean)) thoughts.push(clean)
+      } else if (ev.type === 'thinking_token') {
+        const clean = ev.content || ""
+        if (clean) {
+          // Streaming logic: append to last thought if it's also a token, or start new
+          if (isStreaming && isLast) isThinkingStreaming = true
+          
+          if (thoughts.length > 0) {
+            thoughts[thoughts.length - 1] += clean
+          } else {
+            thoughts.push(clean)
+          }
         }
+      } else if (ev.type === 'text') {
+        // Detect "📋 KẾ HOẠCH" which comes as text in live runs
+        if (ev.content && ev.content.includes('📋 KẾ HOẠCH')) {
+          others.push({ ...ev, type: 'plan' })
+          return
+        }
+
+        const { thinking, answer, isThinkingComplete } = parseThinking(ev.content)
+        if (thinking) {
+          const clean = thinking.replace(/<\/?(?:think|thought)>/gi, '').trim()
+          if (clean && !thoughts.includes(clean)) thoughts.push(clean)
+          if (isStreaming && isLast && !isThinkingComplete) isThinkingStreaming = true
+        }
+
         if (answer) {
           const lastGroup = others.length > 0 ? others[others.length - 1] : null
           if (lastGroup?.type === 'answer') {
@@ -630,49 +804,18 @@ function AgentMessage({ events, isStreaming }) {
         } else {
           others.push(ev)
         }
-      } else if (ev.type !== 'thinking' && ev.type !== 'thinking_token') {
+      } else {
+        // tool_call, screenshot, plan, error, step
         others.push(ev)
       }
-
-      if (contentToProcess && !finalThinkingEv) {
-        const clean = contentToProcess.replace(/<\/?(?:think|thought)>/gi, '').trim()
-        if (clean) {
-          let foundContained = false
-          for (let i = 0; i < thoughts.length; i++) {
-            if (clean.includes(thoughts[i]) || thoughts[i].startsWith(clean)) {
-              if (clean.length >= thoughts[i].length) thoughts[i] = clean
-              foundContained = true; break
-            } else if (thoughts[i].includes(clean)) {
-              foundContained = true; break
-            }
-          }
-          if (!foundContained) thoughts.push(clean)
-        }
-        if (markAsStreaming) isThinkingStreaming = true
-      }
     })
 
-    // Clean up junk text fragments (leaked tokens before <think> like "The", "Step", "I")
-    const cleanedOthers = others.filter((item) => {
-      if (item.type !== 'answer') return true
-      const text = (item.content || '').trim()
-      if (text.length > 25) return true
-      if (/[.!?:,;*|#\-\[\]()]/.test(text)) return true
-      if (text.includes('http') || text.includes('```')) return true
-      if (text.split(/[\s\n]+/).length > 5) return true
-      return false
-    })
+    // Final cleanup of thinking content (remove duplicates and markdown-style tags)
+    const uniqueThoughts = thoughts.map(t => t.replace(/<\/?(?:think|thought)>/gi, '').trim()).filter(Boolean)
 
     return {
-      thinkingContent: thoughts.reduce((acc, curr) => {
-        if (!acc) return curr
-        // If last segment doesn't end in punctuation or is very short, join with space
-        if (!/[.!?]$/.test(acc.trim()) || curr.length < 50 || acc.length < 50) {
-          return acc.trim() + " " + curr.trim()
-        }
-        return acc.trim() + "\n\n" + curr.trim()
-      }, "").trim(),
-      otherItems: cleanedOthers,
+      thinkingContent: uniqueThoughts.join('\n\n'),
+      otherItems: others,
       isThinkingStreaming
     }
   }, [events, isStreaming])
@@ -702,16 +845,25 @@ function AgentMessage({ events, isStreaming }) {
                 if (e.type !== 'tool_result' || e.tool !== item.tool) return false
                 return matchCount++ === callIdx
               })
-              return <ToolStep key={i} step={{ tool: item.tool, args: item.args, result: resultEv?.result }} />
+              return <ToolStep key={i} step={{ tool: item.tool, args: item.args, result: resultEv?.result }} isStreaming={isStreaming} />
             }
             case 'screenshot':
               return <ScreenshotBlock key={i} url={item.url} base64={item.base64} path={item.path} />
+            case 'step':
+              return (
+                <div key={i} className="flex items-center gap-3 px-4 py-3 mb-6 rounded-2xl border animate-fade-in bg-primary-500/10 border-primary-500/20 text-primary-400">
+                  <div className="p-1.5 bg-primary-500/20 rounded-lg"><Activity size={14} className="animate-pulse" /></div>
+                  <span className="text-[11px] font-black uppercase tracking-widest leading-none">{item.content}</span>
+                </div>
+              )
             case 'answer':
               return (
                 <div key={i} className="chat-bubble-ai max-w-none text-light-900 dark:text-white leading-relaxed font-medium">
                   <ChatMarkdown content={item.content} />
                 </div>
               )
+            case 'plan':
+              return <Roadmap key={i} content={item.content} isDark={document.documentElement.classList.contains('dark')} />
             case 'error':
               return (
                 <div key={i} className="flex items-center gap-3 bg-red-500/10 border border-red-500/20 rounded-2xl px-4 py-3 text-red-400 text-sm font-bold">
@@ -850,14 +1002,14 @@ export default function Chat() {
   const [agentEvents, setAgentEvents] = useState(cached?.agentEvents ?? [])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
+  // Model parameters (read from global settings in localStorage)
+  const [temperature] = useState(() => Number(localStorage.getItem('hatai_temp')) || 0.7)
+  const [maxTokens] = useState(() => Number(localStorage.getItem('hatai_tokens')) || 4096)
   const [showSettings, setShowSettings] = useState(false)
-  const [temperature, setTemperature] = useState(0.5)
-  const [maxTokens, setMaxTokens] = useState(2048)
-  const [geminiKey, setGeminiKey] = useState('')
-  const [ollamaUrl, setOllamaUrl] = useState('')
-  const [openaiApiBase, setOpenaiApiBase] = useState('')
-  const [savingSettings, setSavingSettings] = useState(false)
   const [useDaemon, setUseDaemon] = useState(true)
+  const [attachments, setAttachments] = useState([])
+  const [isUploadingMedia, setIsUploadingMedia] = useState(false)
+  const [isContextOpen, setIsContextOpen] = useState(false)
   const [editingQuickPrompts, setEditingQuickPrompts] = useState(false)
   const [quickPrompts, setQuickPrompts] = useState(() => {
     const saved = localStorage.getItem('hatai_quick_prompts')
@@ -962,31 +1114,6 @@ export default function Chat() {
     api.get('/ai/sessions').then(r => setSessions(r.data)).catch(() => { })
   }, [])
 
-  useEffect(() => {
-    if (showSettings) {
-      api.get('/ai/settings').then(r => {
-        setGeminiKey(r.data.gemini_api_key || '')
-        setOllamaUrl(r.data.ollama_url || '')
-        setOpenaiApiBase(r.data.openai_api_base || '')
-      }).catch(() => { })
-    }
-  }, [showSettings])
-
-  const handleSaveSettings = async () => {
-    setSavingSettings(true)
-    try {
-      await api.post('/ai/settings', {
-        gemini_api_key: geminiKey,
-        ollama_url: ollamaUrl,
-        openai_api_base: openaiApiBase
-      })
-      alert('Đã lưu cấu hình API')
-    } catch (e) {
-      alert('Lỗi khi lưu cấu hình: ' + e.message)
-    }
-    setSavingSettings(false)
-  }
-
   const handleNewChat = () => {
     setActiveSession(null)
     setAgentEvents([])
@@ -999,7 +1126,15 @@ export default function Chat() {
       const res = await api.get(`/ai/sessions/${id}/messages`)
       console.log(`[API] Fetched ${res.data.length} messages for session ${id}`)
       const formatted = res.data.map(m => {
-        if (m.role === 'user') return { role: 'user', content: m.content, id: m.id }
+        if (m.role === 'user') {
+          let attachments = []
+          try {
+            if (m.attachments) attachments = JSON.parse(m.attachments)
+          } catch (e) {
+            console.error('Lỗi parse attachments:', e)
+          }
+          return { role: 'user', content: m.content, id: m.id, attachments }
+        }
         else {
           const events = parseEventsFromContent(m.content)
           return { role: 'agent', events, id: m.id }
@@ -1040,6 +1175,23 @@ export default function Chat() {
     }
   }
 
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    setIsUploadingMedia(true)
+    const formData = new FormData()
+    formData.append('file', file)
+    try {
+      const resp = await api.post('/ai/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+      setAttachments(prev => [...prev, resp.data])
+      setIsContextOpen(false)
+    } catch (err) {
+      alert('Upload failed: ' + err.message)
+    } finally {
+      setIsUploadingMedia(false)
+    }
+  }
+
   // ── Send message to Agent ─────────────────────────────────────────────
   const sendAgentMessage = async (msg) => {
     if (!msg?.trim() || streaming) return
@@ -1048,7 +1200,7 @@ export default function Chat() {
 
     setAgentEvents(prev => [
       ...prev,
-      { role: 'user', content: trimmed },
+      { role: 'user', content: trimmed, attachments: [...attachments] },
       { role: 'agent', id: Date.now(), events: [] }
     ])
 
@@ -1057,6 +1209,7 @@ export default function Chat() {
       const res = await api.post('/tasks', {
         prompt: trimmed,
         session_id: activeSession,
+        attachments: attachments,
         temperature,
         max_tokens: maxTokens
       })
@@ -1080,8 +1233,9 @@ export default function Chat() {
 
   const handleSend = async () => {
     const msg = input.trim()
-    if (!msg) return
+    if (!msg && attachments.length === 0) return
     setInput('')
+    setAttachments([])
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
 
     // If agent is currently running, inject the message as user intervention
@@ -1104,10 +1258,12 @@ export default function Chat() {
     try {
       await api.post('/tasks', {
         prompt: msg,
+        attachments: attachments,
         temperature,
         max_tokens: maxTokens
       })
       setInput('')
+      setAttachments([])
       if (textareaRef.current) textareaRef.current.style.height = 'auto'
       navigate('/tasks')
     } catch (err) {
@@ -1182,35 +1338,40 @@ export default function Chat() {
         {/* Mobile Header - Compact version */}
         <div className="flex md:hidden items-center justify-between px-4 py-3 border-b border-light-200 dark:border-slate-800/40 bg-white/80 dark:bg-dark-950/80 backdrop-blur-md sticky top-0 z-20">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center shadow-lg shadow-primary-500/20">
+            <div className="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center shadow-lg shadow-primary-500/20 relative">
               <Bot size={16} className="text-white" />
+              <div className={`absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full border border-white dark:border-dark-900 ${daemon.connected ? 'bg-emerald-500' : 'bg-red-500'}`} />
             </div>
-            <span className="text-[10px] font-black uppercase tracking-widest opacity-40">HatAI Chat</span>
+            <div className="flex items-center gap-1.5">
+               <span className="text-[10px] font-black uppercase tracking-widest opacity-40">HatAI Chat</span>
+               <div className={`w-1 h-1 rounded-full ${daemon.connected ? 'bg-emerald-500' : 'bg-red-500'}`} />
+            </div>
           </div>
-          <button onClick={handleNewChat} className="p-2 text-light-500" title="New Session">
-            <Plus size={20} />
-          </button>
+          <div className="flex items-center gap-1">
+            <button onClick={() => setChatSidebarOpen(true)} className="p-2 text-light-500 dark:text-slate-400 hover:bg-light-100 dark:hover:bg-dark-900 rounded-lg transition-all" title="History">
+              <History size={20} />
+            </button>
+            <button onClick={handleNewChat} className="p-2 text-light-500 dark:text-slate-400 hover:bg-light-100 dark:hover:bg-dark-900 rounded-lg transition-all" title="New Session">
+              <Plus size={20} />
+            </button>
+          </div>
         </div>
 
         {/* Desktop Header */}
-        <div className="hidden md:flex items-center justify-between px-4 md:px-8 py-5 border-b border-light-200 dark:border-slate-800/50 bg-white/80 dark:bg-dark-950/80 backdrop-blur-md sticky top-0 z-20">
+        <div className="hidden md:flex items-center justify-between px-4 md:px-8 py-4 border-b border-light-200 dark:border-slate-800/50 bg-white/80 dark:bg-dark-950/80 backdrop-blur-md sticky top-0 z-20">
           <div className="flex items-center gap-3 min-w-0">
-            <button onClick={() => setChatSidebarOpen(true)} className="p-2 text-light-500 dark:text-slate-400 hover:bg-light-100 dark:hover:bg-dark-900 rounded-xl transition-all md:hidden">
-              <Menu size={22} />
-            </button>
-            <div className="min-w-0">
+            <div className="flex items-center gap-3">
               <p className="text-base md:text-lg font-black text-light-900 dark:text-white truncate flex items-center gap-2 tracking-tight">
-                <span className="relative flex h-2.5 w-2.5">
+                <span className="relative flex h-2 w-2">
                   <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${daemon.connected ? 'bg-emerald-400' : 'bg-red-400'} opacity-75`}></span>
-                  <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${daemon.connected ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]'}`}></span>
+                  <span className={`relative inline-flex rounded-full h-2 w-2 ${daemon.connected ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
                 </span>
                 HatAI Smart Agent
               </p>
-              <p className="text-[10px] text-light-500 dark:text-slate-600 uppercase tracking-[0.2em] font-black truncate hidden sm:block opacity-70">
-                {daemon.connected ? (
-                  <span className="text-emerald-600 dark:text-emerald-400">HatAI Active</span>
-                ) : 'SSE Fallback'}
-              </p>
+              <div title={daemon.connected ? 'Neural Link Active' : 'Offline'}
+                className={`p-1.5 rounded-lg border transition-all ${daemon.connected ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500' : 'bg-light-100 dark:bg-dark-900 border-light-200 dark:border-slate-800 text-light-400 dark:text-dark-400'}`}>
+                {daemon.connected ? <Wifi size={14} /> : <WifiOff size={14} />}
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -1227,86 +1388,17 @@ export default function Chat() {
                 <Play size={18} />
               </button>
             )}
-            {/* Connection indicator */}
-            <button onClick={() => setUseDaemon(!useDaemon)} title={useDaemon ? 'Daemon mode (click to switch to SSE)' : 'SSE mode (click to switch to Daemon)'}
-              className={`p-2 rounded-xl transition-all ${useDaemon && daemon.connected ? 'text-emerald-500 hover:bg-emerald-500/10' : 'text-light-400 dark:text-dark-400 hover:bg-light-100 dark:hover:bg-dark-900'}`}>
-              {daemon.connected ? <Wifi size={18} /> : <WifiOff size={18} />}
-            </button>
           </div>
-          <button id="chat-settings-btn" onClick={() => setShowSettings(!showSettings)}
-            className={`p-2.5 rounded-xl transition-all duration-150 ${showSettings ? 'text-primary-600 bg-primary-600/10 rotate-90 scale-110 shadow-lg' : 'text-light-400 dark:text-dark-400 hover:text-light-900 dark:hover:text-white hover:bg-light-100 dark:hover:bg-dark-900'}`}
-          >
-            <Settings2 size={20} />
-          </button>
         </div>
 
-        {/* Settings Panel */}
-        {showSettings && (
-          <div className="bg-light-50 dark:bg-dark-900 border-b border-light-200 dark:border-slate-800/50 px-6 py-8 animate-fade-in shadow-inner overflow-y-auto max-h-[60vh] custom-scrollbar">
-            <div className="max-w-4xl mx-auto flex flex-col md:flex-row gap-12">
-              <div className="space-y-6 flex-shrink-0 md:w-64">
-                <h4 className="font-black text-light-900 dark:text-slate-200 text-[10px] uppercase tracking-[0.2em] border-b border-light-200 dark:border-slate-800 pb-2 opacity-60">Engine Settings</h4>
-                <div className="space-y-6">
-                  <div>
-                    <div className="flex justify-between mb-3 text-[11px] font-bold">
-                      <label className="text-light-700 dark:text-slate-400">Temperature</label>
-                      <span className="text-primary-600">{temperature}</span>
-                    </div>
-                    <input type="range" min="0" max="1" step="0.1" value={temperature}
-                      onChange={e => setTemperature(+e.target.value)} className="w-full accent-primary-600 h-1 bg-light-200 dark:bg-dark-800 rounded-full appearance-none cursor-pointer" />
-                  </div>
-                  <div>
-                    <div className="flex justify-between mb-3 text-[11px] font-bold">
-                      <label className="text-light-700 dark:text-slate-400">Context Limit</label>
-                      <span className="text-primary-600">{maxTokens}</span>
-                    </div>
-                    <input type="range" min="256" max="8192" step="256" value={maxTokens}
-                      onChange={e => setMaxTokens(+e.target.value)} className="w-full accent-primary-600 h-1 bg-light-200 dark:bg-dark-800 rounded-full appearance-none cursor-pointer" />
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex-1 space-y-6">
-                <h4 className="font-black text-light-900 dark:text-slate-200 text-[10px] uppercase tracking-[0.2em] border-b border-light-200 dark:border-slate-800 pb-2 opacity-60">Credentials</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                  <div className="col-span-1">
-                    <label className="block text-[11px] font-bold text-light-600 dark:text-slate-400 mb-2">Gemini API Key</label>
-                    <input type="password" className="input-field w-full py-2.5 px-4 text-xs font-mono"
-                      placeholder="AIzaSy..." value={geminiKey} onChange={e => setGeminiKey(e.target.value)} />
-                  </div>
-                  <div className="col-span-1">
-                    <label className="block text-[11px] font-bold text-light-600 dark:text-slate-400 mb-2">Ollama Host</label>
-                    <input type="text" className="input-field w-full py-2.5 px-4 text-xs font-mono"
-                      placeholder="http://localhost:11434" value={ollamaUrl} onChange={e => setOllamaUrl(e.target.value)} />
-                  </div>
-                  <div className="col-span-full">
-                    <label className="block text-[11px] font-bold text-light-600 dark:text-slate-400 mb-2">Custom Base URL</label>
-                    <div className="flex gap-3">
-                      <input type="text" className="input-field flex-1 py-2.5 px-4 text-xs font-mono"
-                        placeholder="http://127.0.0.1:8080/v1" value={openaiApiBase} onChange={e => setOpenaiApiBase(e.target.value)} />
-                      <button onClick={handleSaveSettings} disabled={savingSettings}
-                        className="bg-primary-600 hover:bg-primary-500 text-white px-6 py-2.5 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-50 shadow-xl shadow-primary-600/20 active:scale-95">
-                        {savingSettings ? <Loader2 size={16} className="animate-spin" /> : 'Apply'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Messages Container */}
         <div className="flex-1 overflow-y-auto custom-scrollbar scroll-smooth">
           {agentEvents.length === 0 ? (
             <div className="flex flex-col items-center justify-center min-h-full py-20 px-6 animate-fade-in text-center">
-              <div className="w-24 h-24 rounded-[42px] bg-white dark:bg-dark-900 border border-light-200 dark:border-slate-800 shadow-2xl flex items-center justify-center mb-12 transform hover:scale-105 transition-transform duration-150">
-                <Bot size={48} className="text-primary-500" />
+              <div className="w-16 h-16 rounded-2xl bg-white dark:bg-dark-900 border border-light-200 dark:border-slate-800 shadow-2xl flex items-center justify-center mb-8 transform hover:scale-105 transition-transform duration-150">
+                <Bot size={32} className="text-primary-500" />
               </div>
-              <h1 className="text-3xl md:text-5xl font-black text-light-900 dark:text-white tracking-tighter mb-4">How can I help you?</h1>
-              <p className="max-w-md text-light-500 dark:text-slate-500 text-base md:text-lg font-medium leading-relaxed mb-16 opacity-80">
-                Your autonomous agent is ready to build, search, and automate the web for you.
-              </p>
               <div className="flex flex-col gap-6 w-full max-w-2xl">
                 <div className="flex items-center justify-between px-2">
                   <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-light-400 dark:text-slate-600">Quick Actions</h2>
@@ -1358,13 +1450,24 @@ export default function Chat() {
                 if (msg.role === 'user') {
                   return (
                     <div key={msg.id || i} className="flex gap-4 flex-row-reverse animate-slide-up group">
-                      <div className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center bg-light-100 dark:bg-dark-900 border border-light-200 dark:border-slate-800 shadow-sm transition-transform group-hover:scale-110">
+                       <div className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center bg-light-100 dark:bg-dark-900 border border-light-200 dark:border-slate-800 shadow-sm transition-transform group-hover:scale-110">
                         <User size={20} className="text-light-400 dark:text-slate-500" />
                       </div>
-                      <div className="max-w-[85%] bg-white dark:bg-dark-900/60 border border-light-200 dark:border-slate-800/40 rounded-[24px] px-6 py-4 shadow-sm">
-                        <p className="text-base text-light-900 dark:text-slate-100 leading-relaxed whitespace-pre-wrap font-medium">
-                          {msg.content.replace(/<\/?(?:think|thought)>[\s\S]*?(?:<\/?(?:think|thought)>|$)/gi, '').replace(/<\/?(?:think|thought)>/gi, '').trim()}
-                        </p>
+                      <div className="max-w-[85%] flex flex-col items-end gap-3">
+                        {msg.attachments && msg.attachments.length > 0 && (
+                          <div className="flex flex-wrap gap-2 justify-end">
+                            {msg.attachments.map((file, idx) => (
+                              <div key={idx} className="relative group w-20 h-20 rounded-[22px] overflow-hidden border border-light-200 dark:border-slate-800 shadow-sm">
+                                {file.type?.startsWith('image') ? <img src={file.url} className="w-full h-full object-cover" /> : <div className="flex flex-col items-center justify-center h-full gap-1 opacity-40 bg-light-50 dark:bg-dark-900"><FileCode size={16}/><span className="text-[7px] uppercase font-black">File</span></div>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <div className="bg-white dark:bg-dark-900/60 border border-light-200 dark:border-slate-800/40 rounded-[24px] px-6 py-4 shadow-sm">
+                          <p className="text-base text-light-900 dark:text-slate-100 leading-relaxed whitespace-pre-wrap font-medium">
+                            {msg.content.replace(/<\/?(?:think|thought)>[\s\S]*?(?:<\/?(?:think|thought)>|$)/gi, '').replace(/<\/?(?:think|thought)>/gi, '').trim()}
+                          </p>
+                        </div>
                       </div>
                     </div>
                   )
@@ -1391,7 +1494,19 @@ export default function Chat() {
         {/* Floating Input Dock */}
         <div className="px-6 md:px-12 pb-10 pt-2 bg-gradient-to-t from-white via-white dark:from-dark-950 dark:via-dark-950 to-transparent">
           <div className="max-w-4xl mx-auto relative">
-            <div className="relative flex flex-col bg-white dark:bg-dark-900 border border-light-200 dark:border-slate-800/60 rounded-[32px] shadow-2xl transition-all duration-150 focus-within:ring-4 focus-within:ring-primary-500/10 focus-within:border-primary-500/40 overflow-hidden">
+            <div className="relative flex flex-col bg-white dark:bg-dark-900 border border-light-200 dark:border-slate-800/60 rounded-[32px] shadow-2xl transition-all duration-150 focus-within:ring-4 focus-within:ring-primary-500/10 focus-within:border-primary-500/40">
+              {attachments.length > 0 && (
+                <div className="flex gap-4 px-8 pt-6 overflow-x-auto custom-scrollbar-h pb-2">
+                  {attachments.map((file, idx) => (
+                    <div key={idx} className="relative group shrink-0">
+                      <div className="w-20 h-20 rounded-[22px] overflow-hidden border border-light-200 dark:border-slate-800 shadow-lg">
+                        {file.type?.startsWith('image') ? <img src={file.url} className="w-full h-full object-cover" /> : <div className="flex flex-col items-center justify-center h-full gap-2 opacity-40 bg-light-50 dark:bg-dark-900"><FileCode size={20}/><span className="text-[8px] uppercase font-black">File</span></div>}
+                      </div>
+                      <button onClick={() => setAttachments(prev => prev.filter((_, i) => i !== idx))} className="absolute -top-2 -right-2 w-6 h-6 bg-red-600 text-white rounded-full flex items-center justify-center shadow-lg hover:scale-110 opacity-0 group-hover:opacity-100 transition-all"><X size={12} /></button>
+                    </div>
+                  ))}
+                </div>
+              )}
               <textarea
                 ref={textareaRef}
                 rows={1}
@@ -1404,19 +1519,67 @@ export default function Chat() {
               />
 
               <div className="flex items-center justify-between px-8 pb-6">
-                <div className="flex items-center gap-3">
-                  {/* Mobile History Toggle in Bottom Bar */}
+                <div className="flex items-center gap-3 relative">
+                  <input type="file" id="chat-media-upload" className="hidden" onChange={handleFileUpload} accept="image/*,application/pdf" />
+                  
+                  {/* Elite Context Trigger */}
                   <button 
-                    onClick={() => setChatSidebarOpen(true)}
-                    className="flex md:hidden items-center gap-2 px-3 py-2 bg-primary-500/10 text-primary-600 dark:text-primary-500 rounded-xl border border-primary-500/10 active:scale-95 transition-all"
+                    onClick={(e) => { e.stopPropagation(); setIsContextOpen(!isContextOpen); }} 
+                    className={`group/plus w-11 h-11 flex items-center justify-center rounded-2xl transition-all duration-500 active:scale-95 border ${
+                      isContextOpen 
+                        ? 'bg-primary-600 border-primary-400 text-white shadow-[0_0_20px_rgba(59,130,246,0.5)]' 
+                        : 'bg-white/5 border-white/10 text-slate-500 hover:text-white hover:bg-white/10 hover:border-white/20'
+                    }`}
                   >
-                    <History size={16} />
-                    <span className="text-[10px] font-black uppercase tracking-widest">History</span>
+                    {isUploadingMedia ? (
+                      <Activity size={18} className="animate-spin text-primary-400" />
+                    ) : (
+                      <Plus size={20} className={`transition-transform duration-500 ${isContextOpen ? 'rotate-45' : 'group-hover/plus:rotate-90'}`} />
+                    )}
                   </button>
 
-                  <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-emerald-500/5 dark:bg-emerald-500/10 border border-emerald-500/10 rounded-full">
+                  {/* Premium Context Menu */}
+                  {isContextOpen && (
+                    <>
+                      <div className="fixed inset-0 z-[800]" onClick={() => setIsContextOpen(false)} />
+                      <div className="absolute bottom-[calc(100%+20px)] left-0 w-72 p-2 rounded-[32px] border border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-[900] animate-in fade-in zoom-in-95 slide-in-from-bottom-4 duration-300 backdrop-blur-2xl bg-slate-900/90 overflow-hidden">
+                        <div className="absolute inset-0 bg-gradient-to-br from-primary-500/10 via-transparent to-transparent opacity-50 pointer-events-none" />
+                        <div className="relative z-10">
+                          <div className="px-5 py-3 flex items-center justify-between border-b border-white/5 mb-2">
+                            <span className="text-[10px] font-black uppercase tracking-[0.25em] text-primary-500">Neural Context</span>
+                            <div className="w-1.5 h-1.5 rounded-full bg-primary-500 animate-pulse" />
+                          </div>
+                          
+                          <div className="space-y-1 p-1">
+                            <button onClick={() => document.getElementById('chat-media-upload').click()} className="w-full group/item flex items-center gap-4 px-4 py-3.5 rounded-[24px] hover:bg-white/5 transition-all duration-300 text-slate-400 hover:text-white">
+                              <div className="w-10 h-10 rounded-2xl bg-orange-500/10 flex items-center justify-center group-hover/item:scale-110 transition-transform duration-300">
+                                <ImageIcon size={20} className="text-orange-500" />
+                              </div>
+                              <div className="flex flex-col items-start leading-tight">
+                                <span className="text-[14px] font-bold">Media & Files</span>
+                                <span className="text-[10px] opacity-40 font-medium">Analyze images or documents</span>
+                              </div>
+                            </button>
+
+                            <button onClick={() => { setIsContextOpen(false); setInput(p => p + '@'); textareaRef.current.focus(); }} className="w-full group/item flex items-center gap-4 px-4 py-3.5 rounded-[24px] hover:bg-white/5 transition-all duration-300 text-slate-400 hover:text-white">
+                              <div className="w-10 h-10 rounded-2xl bg-primary-500/10 flex items-center justify-center group-hover/item:scale-110 transition-transform duration-300">
+                                <AtSign size={20} className="text-primary-500" />
+                              </div>
+                              <div className="flex flex-col items-start leading-tight">
+                                <span className="text-[14px] font-bold">Mentions</span>
+                                <span className="text-[10px] opacity-40 font-medium">Reference specific modules</span>
+                              </div>
+                            </button>
+
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  <div className="hidden md:flex items-center gap-2.5 px-4 py-2 bg-emerald-500/5 border border-emerald-500/10 rounded-2xl">
                     <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    <p className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest leading-none">System Stable</p>
+                    <p className="text-[10px] font-black text-emerald-500 uppercase tracking-widest leading-none">System Stable</p>
                   </div>
                 </div>
 
@@ -1426,16 +1589,16 @@ export default function Chat() {
                     <Square size={20} fill="currentColor" />
                   </button>
                 ) : (
-                  <div className="flex items-center gap-2">
-                    <button onClick={handleCreateTask} disabled={!input.trim()}
+                  <div className="flex items-center gap-3">
+                    <button onClick={handleCreateTask} disabled={!input.trim() && attachments.length === 0}
                       title="Chạy ngầm (Background Task)"
-                      className="flex-shrink-0 w-10 h-10 md:w-12 md:h-12 rounded-[20px] md:rounded-[22px] bg-primary-50 dark:bg-primary-500/10 text-primary-500 hover:bg-primary-500 hover:text-white flex items-center justify-center transition-all disabled:opacity-30 disabled:grayscale active:scale-90">
-                      <Zap size={22} className={input.trim() ? "animate-in zoom-in-50 duration-150" : ""} />
+                      className="flex-shrink-0 w-11 h-11 md:w-13 md:h-13 rounded-2xl bg-white/5 text-slate-400 border border-white/10 hover:bg-primary-500 hover:text-white hover:border-primary-400 flex items-center justify-center transition-all duration-300 disabled:opacity-20 disabled:grayscale active:scale-90">
+                      <Zap size={22} className={(input.trim() || attachments.length > 0) ? "animate-in zoom-in-50 duration-150" : ""} />
                     </button>
-                    <button onClick={handleSend} disabled={!input.trim()}
+                    <button onClick={handleSend} disabled={!input.trim() && attachments.length === 0}
                       title="Gửi câu hỏi"
-                      className="flex-shrink-0 w-10 h-10 md:w-12 md:h-12 rounded-[20px] md:rounded-[22px] bg-primary-600 text-white shadow-xl shadow-primary-600/30 hover:bg-primary-500 flex items-center justify-center transition-all disabled:opacity-20 disabled:grayscale disabled:scale-95 disabled:shadow-none active:scale-90">
-                      <Send size={24} fill="currentColor" className={input.trim() ? "animate-in zoom-in-50 duration-150" : ""} />
+                      className="flex-shrink-0 w-11 h-11 md:w-13 md:h-13 rounded-2xl bg-primary-600 text-white shadow-[0_10px_30px_rgba(37,99,235,0.3)] hover:bg-primary-500 hover:scale-105 flex items-center justify-center transition-all duration-300 disabled:opacity-20 disabled:grayscale disabled:scale-95 disabled:shadow-none active:scale-90">
+                      <Send size={24} fill="currentColor" className={(input.trim() || attachments.length > 0) ? "animate-in zoom-in-50 duration-150" : ""} />
                     </button>
                   </div>
                 )}

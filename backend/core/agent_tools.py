@@ -136,7 +136,7 @@ GIT: git_ops{action,cwd?,message?,file?,branch?,target?,n?,staged?} → actions:
 DOCS: analyze_document{path,focus?}
 SEARCH: deep_search{query,max_results?} → ALWAYS use this for any search/research request. Searches Google, crawls every result link, extracts full content, returns everything for you to summarize.
 BROWSER: browser_go{url} | open_browser{url} | browser_close_tab{which?,url?} | browser_read{} | browser_click{selector} | browser_type{selector,text} | browser_js{script} | browser_wait{seconds?} | browser_extract{selector,attribute?} | browser_extract_prices{} | site_search{site,query}
-DESKTOP: screenshot{} | sys_mouse{x,y,action?,amount?,drag_to_x?,drag_to_y?} | sys_type{text,app?,telex?} → telex=true for Vietnamese Telex IME | sys_key{key,modifiers?,app?} | sys_open_app{app_name} | sys_get_active_app{}
+DESKTOP: screenshot{} | sys_mouse{x,y,action?,amount?,drag_to_x?,drag_to_y?} | sys_type{text,app?,telex?} → telex=true for Vietnamese Telex IME | sys_key{key,modifiers?,app?} | sys_open_app{app_name} | sys_get_active_app{} | sys_stats{} → Get macOS CPU/Memory stats
 AI_CODING: claude_code{action,prompt,cwd?,path?,instruction?,focus?,model?} → prompt|edit|review
 AI_CODING: antigravity{action,path?,code?,filename?,instruction?,ext_id?,command?,cwd?} → actions: open_file|open_folder|new_file(requires code)|diff|goto|run_terminal|ai_edit(instruction required)|ai_inline|list_extensions|install_extension|uninstall_extension
 MEMORY: scratchpad{action,content?} | remember{content,type,topic?} | query_knowledge{topic,query} | add_knowledge{topic,content} | session_query{query,n?} → Smart query: searches session data first, then global knowledge if session is empty. Use this for ANY knowledge lookup.
@@ -239,16 +239,100 @@ def tool_run_command(args: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         return {"error": str(e), "exit_code": -1}
 
+def tool_sys_stats(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Get detailed system statistics for macOS (CPU, Memory, Disk)."""
+    logger.info("📊 Gathering system statistics...")
+    
+    try:
+        # 1. Total Physical Memory
+        hw_mem_res = subprocess.check_output(["sysctl", "-n", "hw.memsize"]).strip()
+        hw_mem = int(hw_mem_res)
+        total_gb = round(hw_mem / (1024**3), 1)
+        
+        # 2. Virtual Memory Stats (via vm_stat)
+        vm_stat_raw = subprocess.check_output(["vm_stat"]).decode("utf-8")
+        # Page size (usually 4K or 16K)
+        ps_match = re.search(r"page size of (\d+) bytes", vm_stat_raw)
+        page_size = int(ps_match.group(1)) if ps_match else 4096
+        
+        vm_data = {}
+        for line in vm_stat_raw.split('\n'):
+            if ':' in line:
+                k, v = line.split(':')
+                vm_data[k.strip()] = int(v.strip().rstrip('.')) * page_size
+        
+        # Key categories as Activity Monitor shows
+        wired = vm_data.get("Pages wired down", 0)
+        active = vm_data.get("Pages active", 0)
+        inactive = vm_data.get("Pages inactive", 0)
+        free = vm_data.get("Pages free", 0)
+        compressed = vm_data.get("Pages occupied by compressor", 0)
+        
+        # 3. CPU Usage (via top summary)
+        top_res = subprocess.run(["top", "-l", "1", "-n", "0"], capture_output=True, text=True, timeout=5)
+        cpu_usage = "Unknown"
+        load_avg = "Unknown"
+        
+        if top_res.returncode == 0:
+            cpu_m = re.search(r"CPU usage:\s*(.*)", top_res.stdout)
+            if cpu_m: cpu_usage = cpu_m.group(1).strip()
+            load_m = re.search(r"Load Avg:\s*(.*)", top_res.stdout)
+            if load_m: load_avg = load_m.group(1).strip()
+
+        # 4. Disk Usage (Free space on system root)
+        df_res = subprocess.run(["df", "-h", "/"], capture_output=True, text=True, timeout=2)
+        disk_info = {}
+        if df_res.returncode == 0:
+            lines = df_res.stdout.strip().split('\n')
+            if len(lines) > 1:
+                parts = re.split(r'\s+', lines[1])
+                if len(parts) >= 4:
+                    disk_info = {"total": parts[1], "used": parts[2], "free": parts[3], "percent": parts[4]}
+
+        return {
+            "memory": {
+                "total": f"{total_gb} GB",
+                "wired": f"{round(wired/(1024**2), 0)} MB",
+                "active": f"{round(active/(1024**2), 0)} MB",
+                "inactive": f"{round(inactive/(1024**2), 0)} MB",
+                "free": f"{round(free/(1024**2), 0)} MB",
+                "compressed": f"{round(compressed/(1024**2), 0)} MB",
+                "page_size": f"{page_size} bytes"
+            },
+            "cpu": {
+                "usage": cpu_usage,
+                "load_avg": load_avg
+            },
+            "disk": disk_info,
+            "platform": "macOS",
+            "message": "✅ System statistics retrieved successfully."
+        }
+    except Exception as e:
+        return {"error": f"Failed to retrieve stats: {str(e)}"}
+
+
+def _resolve_relative_path(path: str) -> str:
+    """Resolve a path relative to the current working directory if it's not absolute."""
+    if not path:
+        return ""
+    if os.path.isabs(path):
+        return path
+    return os.path.abspath(os.path.join(os.getcwd(), path))
 
 def tool_read_file(args: Dict[str, Any]) -> Dict[str, Any]:
     path = args.get("path") or ""
+    path = _resolve_relative_path(path)
     if not _check_path(path):
         return {"error": f"Path not allowed: {path}"}
     if not os.path.isfile(path):
-        return {"error": f"File not found: {path}"}
+        return {"error": f"File not found: {path} (Current Working Directory: {os.getcwd()})"}
 
     ext = path.lower().split(".")[-1]
     
+    # ── Block Images ─────────────────
+    if ext in ["jpg", "jpeg", "png", "webp", "gif", "bmp", "heic"]:
+        return {"error": f"❌ Lỗi: {ext.upper()} là định dạng hình ảnh. Để phân tích tệp này, hãy sử dụng chính năng lực 'THỊ GIÁC' (Vision) của bạn trong <thought> hoặc dùng tool 'analyze_document'."}
+
     try:
         # ── PDF Support ──────────────────
         if ext == "pdf":
@@ -447,7 +531,12 @@ def tool_write_file(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def tool_list_dir(args: Dict[str, Any]) -> Dict[str, Any]:
-    path = args.get("path") or ""
+    path = args.get("path") or "."
+    
+    # If path is "." or empty, resolve it to current directory
+    if path == ".":
+        path = os.getcwd()
+        
     if not _check_path(path):
         return {"error": f"Path not allowed: {path}"}
     if not os.path.isdir(path):
@@ -955,10 +1044,13 @@ def tool_edit_file(args: Dict[str, Any]) -> Dict[str, Any]:
 
     if not path or old_text is None:
         return {"error": "path and old_text are required"}
+        
+    path = _resolve_relative_path(path)
+    
     if not _check_path(path):
         return {"error": f"Path not allowed: {path}"}
     if not os.path.isfile(path):
-        return {"error": f"File not found: {path}"}
+        return {"error": f"File not found: {path} (Current Working Directory: {os.getcwd()})"}
 
     logger.info(f"✏️ Edit file: {path}")
     try:
@@ -1011,10 +1103,12 @@ def tool_replace_lines(args: Dict[str, Any]) -> Dict[str, Any]:
     except ValueError:
         return {"error": "start_line and end_line must be integers"}
 
+    path = _resolve_relative_path(path)
+    
     if not _check_path(path):
         return {"error": f"Path not allowed: {path}"}
     if not os.path.isfile(path):
-        return {"error": f"File not found: {path}"}
+        return {"error": f"File not found: {path} (Current Working Directory: {os.getcwd()})"}
 
     logger.info(f"✏️ Replace lines {start_line}-{end_line} in: {path}")
     try:
@@ -1058,13 +1152,14 @@ def tool_replace_lines(args: Dict[str, Any]) -> Dict[str, Any]:
 def tool_search_code(args: Dict[str, Any]) -> Dict[str, Any]:
     """Search for text/pattern in files using grep."""
     query = args.get("query") or ""
-    path = args.get("path") or os.path.expanduser("~")
+    path = args.get("path") or "."
+    path = _resolve_relative_path(path)
     include = args.get("include") or ""
 
     if not query:
         return {"error": "query is required"}
     if not _check_path(path):
-        return {"error": f"Path not allowed: {path}"}
+        return {"error": f"Path not allowed: {path} (Current Working Directory: {os.getcwd()})"}
 
     logger.info(f"🔎 Search code: '{query}' in {path}")
     try:
@@ -1108,13 +1203,14 @@ def tool_search_code(args: Dict[str, Any]) -> Dict[str, Any]:
 def tool_find_files(args: Dict[str, Any]) -> Dict[str, Any]:
     """Find files by name pattern in a directory."""
     pattern = args.get("pattern") or ""
-    path = args.get("path") or os.path.expanduser("~")
+    path = args.get("path") or "."
+    path = _resolve_relative_path(path)
     file_type = args.get("type") or ""  # 'file' or 'dir'
 
     if not pattern:
         return {"error": "pattern is required"}
     if not _check_path(path):
-        return {"error": f"Path not allowed: {path}"}
+        return {"error": f"Path not allowed: {path} (Current Working Directory: {os.getcwd()})"}
 
     logger.info(f"📂 Find files: '{pattern}' in {path}")
     try:
@@ -3223,7 +3319,11 @@ def tool_antigravity(args: Dict[str, Any]) -> Dict[str, Any]:
 
 def tool_project_tree(args: Dict[str, Any]) -> Dict[str, Any]:
     """Show project directory tree structure."""
-    path = args.get("path") or os.path.expanduser("~/Public/hatai-remote")
+    path = args.get("path") or "."
+    
+    if path == ".":
+        path = os.getcwd()
+        
     max_depth = int(args.get("depth") or 3)
 
     if not _check_path(path):
@@ -3378,10 +3478,13 @@ def tool_multi_edit_file(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": "path is required"}
     if not edits or not isinstance(edits, list):
         return {"error": "edits must be a list of {old_text, new_text} pairs"}
+        
+    path = _resolve_relative_path(path)
+    
     if not _check_path(path):
         return {"error": f"Path not allowed: {path}"}
     if not os.path.isfile(path):
-        return {"error": f"File not found: {path}"}
+        return {"error": f"File not found: {path} (Current Working Directory: {os.getcwd()})"}
 
     logger.info(f"✏️ Multi-edit: {path} ({len(edits)} edits)")
     try:
@@ -3465,6 +3568,7 @@ TOOLS = {
     "sys_type": tool_sys_type,
     "sys_open_app": tool_sys_open_app,
     "sys_get_active_app": tool_sys_get_active_app,
+    "sys_stats": tool_sys_stats,
     "add_knowledge": tool_add_knowledge,
     "query_knowledge": tool_query_knowledge,
     "clear_knowledge": tool_clear_knowledge,

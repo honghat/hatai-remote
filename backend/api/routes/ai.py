@@ -149,23 +149,26 @@ def get_provider():
     return {
         "provider": engine.provider,
         "ready": engine.is_ready,
-        "available": ["local", "gemini", "ollama", "openai"],
+        "available": ["local", "gemini", "ollama", "openai", "deepseek"],
     }
 
 
 @router.get("/settings", tags=["AI"])
 def get_settings():
-    from core.config import GEMINI_API_KEY, OLLAMA_URL, OPENAI_API_BASE
+    from core.config import GEMINI_API_KEY, OLLAMA_URL, OPENAI_API_BASE, OPENAI_API_KEY, DEEPSEEK_API_KEY
     import re
-    # Mask API key for security
-    masked_key = ""
-    if GEMINI_API_KEY:
-        masked_key = GEMINI_API_KEY[:4] + "*" * (len(GEMINI_API_KEY) - 8) + GEMINI_API_KEY[-4:] if len(GEMINI_API_KEY) > 10 else "***"
+    # Mask API keys for security
+    def mask(k):
+        if not k: return ""
+        if len(k) < 10: return "***"
+        return k[:4] + "*" * (len(k) - 8) + k[-4:]
         
     return {
-        "gemini_api_key": masked_key,
+        "gemini_api_key": mask(GEMINI_API_KEY),
         "ollama_url": OLLAMA_URL,
-        "openai_api_base": OPENAI_API_BASE
+        "openai_api_base": OPENAI_API_BASE,
+        "openai_api_key": mask(OPENAI_API_KEY),
+        "deepseek_api_key": mask(DEEPSEEK_API_KEY)
     }
 
 
@@ -179,7 +182,10 @@ def update_settings(data: dict):
     ollama_url = data.get("ollama_url")
     ollama_model = data.get("ollama_model")
     openai_api_base = data.get("openai_api_base")
+    openai_api_key = data.get("openai_api_key")
     openai_model = data.get("openai_model")
+    deepseek_api_key = data.get("deepseek_api_key")
+    deepseek_model = data.get("deepseek_model")
     
     if os.path.exists(env_file):
         with open(env_file, "r") as f:
@@ -201,8 +207,17 @@ def update_settings(data: dict):
         if openai_api_base:
             settings_to_update["OPENAI_API_BASE"] = openai_api_base
             
+        if openai_api_key and not openai_api_key.startswith("***") and "*" not in openai_api_key:
+            settings_to_update["OPENAI_API_KEY"] = openai_api_key
+
         if openai_model:
             settings_to_update["OPENAI_MODEL"] = openai_model
+            
+        if deepseek_api_key and not deepseek_api_key.startswith("***") and "*" not in deepseek_api_key:
+            settings_to_update["DEEPSEEK_API_KEY"] = deepseek_api_key
+            
+        if deepseek_model:
+            settings_to_update["DEEPSEEK_MODEL"] = deepseek_model
             
         new_lines = []
         updated_keys = set()
@@ -238,8 +253,14 @@ def update_settings(data: dict):
             config.OLLAMA_MODEL = settings_to_update["OLLAMA_MODEL"]
         if "OPENAI_API_BASE" in settings_to_update:
             config.OPENAI_API_BASE = settings_to_update["OPENAI_API_BASE"]
+        if "OPENAI_API_KEY" in settings_to_update:
+            config.OPENAI_API_KEY = settings_to_update["OPENAI_API_KEY"]
         if "OPENAI_MODEL" in settings_to_update:
             config.OPENAI_MODEL = settings_to_update["OPENAI_MODEL"]
+        if "DEEPSEEK_API_KEY" in settings_to_update:
+            config.DEEPSEEK_API_KEY = settings_to_update["DEEPSEEK_API_KEY"]
+        if "DEEPSEEK_MODEL" in settings_to_update:
+            config.DEEPSEEK_MODEL = settings_to_update["DEEPSEEK_MODEL"]
             
         engine = LLMEngine.get()
         engine.reload_provider_config()
@@ -350,8 +371,10 @@ async def chat_stream(
 
     messages.append({"role": "user", "content": user_content})
 
-    # Save user message (plain text)
-    svc.add_message(session.id, "user", body.message)
+    # Save user message with attachments
+    import json
+    att_json = json.dumps(body.attachments) if body.attachments else None
+    svc.add_message(session.id, "user", body.message, attachments=att_json)
 
     async def event_generator() -> AsyncGenerator[str, None]:
         # Send session ID first
@@ -424,9 +447,28 @@ async def chat_sync(
     messages = [{"role": "system", "content": system_prompt}]
     for m in history:
         messages.append({"role": m.role, "content": m.content})
-    messages.append({"role": "user", "content": body.message})
+    # User message with Vision (if any)
+    user_content = [{"type": "text", "text": body.message}]
+    if body.attachments:
+        import base64, mimetypes
+        for att in body.attachments:
+            if "url" in att:
+                file_rel = att["url"].lstrip("/")
+                if os.path.exists(file_rel):
+                    with open(file_rel, "rb") as f:
+                        encoded = base64.b64encode(f.read()).decode("utf-8")
+                    mime = mimetypes.guess_type(file_rel)[0] or "image/jpeg"
+                    if mime.startswith("image"):
+                        user_content.append({
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{mime};base64,{encoded}"}
+                        })
 
-    svc.add_message(session.id, "user", body.message)
+    messages.append({"role": "user", "content": user_content})
+
+    import json
+    att_json = json.dumps(body.attachments) if body.attachments else None
+    svc.add_message(session.id, "user", body.message, attachments=att_json)
 
     import asyncio, functools
     loop = asyncio.get_event_loop()
@@ -509,3 +551,83 @@ def update_session(
         raise HTTPException(status_code=404, detail="Session không tồn tại")
     svc.update_session_title(session_id, data.title)
     return {"message": "Đã cập nhật tiêu đề", "title": data.title}
+
+
+# ── AI Providers Database CRUD ───────────────────────────────────────────────
+from db.psql.models.ai_provider import AIProvider
+
+@router.get("/providers", tags=["AI"])
+def list_providers(db: Session = Depends(get_db), user_id: int = Depends(get_current_user)):
+    """List all AI providers stored in DB."""
+    return db.query(AIProvider).order_by(AIProvider.id.asc()).all()
+
+@router.post("/providers", tags=["AI"])
+def create_provider(data: dict, db: Session = Depends(get_db), user_id: int = Depends(get_current_user)):
+    """Create a new AI provider entry."""
+    new_p = AIProvider(
+        name=data.get("name", "New Model"),
+        provider_type=data.get("provider_type", "openai"),
+        model_name=data.get("model_name", ""),
+        api_base=data.get("api_base"),
+        api_key=data.get("api_key"),
+        is_active=False
+    )
+    db.add(new_p)
+    db.commit()
+    db.refresh(new_p)
+    return new_p
+
+@router.put("/providers/{provider_id}", tags=["AI"])
+def update_provider_db(provider_id: int, data: dict, db: Session = Depends(get_db), user_id: int = Depends(get_current_user)):
+    """Update an existing AI provider."""
+    p = db.query(AIProvider).filter(AIProvider.id == provider_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Provider not found")
+    
+    if "name" in data: p.name = data["name"]
+    if "provider_type" in data: p.provider_type = data["provider_type"]
+    if "model_name" in data: p.model_name = data["model_name"]
+    if "api_base" in data: p.api_base = data["api_base"]
+    if "api_key" in data and not data["api_key"].startswith("***"):
+        p.api_key = data["api_key"]
+    
+    db.commit()
+    return p
+
+@router.delete("/providers/{provider_id}", tags=["AI"])
+def delete_provider(provider_id: int, db: Session = Depends(get_db), user_id: int = Depends(get_current_user)):
+    """Delete an AI provider."""
+    p = db.query(AIProvider).filter(AIProvider.id == provider_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Provider not found")
+    db.delete(p)
+    db.commit()
+    return {"message": "Model connection removed from workspace."}
+
+@router.post("/providers/{provider_id}/activate", tags=["AI"])
+def activate_provider_db(provider_id: int, db: Session = Depends(get_db), user_id: int = Depends(get_current_user)):
+    """Activate this specific provider instance."""
+    # Deactivate all others
+    db.query(AIProvider).update({AIProvider.is_active: False})
+    
+    # Activate this one
+    p = db.query(AIProvider).filter(AIProvider.id == provider_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Provider not found")
+    
+    p.is_active = True
+    db.commit()
+    
+    # Apply to Engine immediately
+    engine = LLMEngine.get()
+    engine.load_from_db()
+    
+    return {"message": f"Deployed Linking to {p.name}", "provider": p.provider_type}
+
+@router.post("/providers/seed", tags=["AI"])
+def seed_providers_from_env(db: Session = Depends(get_db)):
+    """Trigger manual seeding from .env config."""
+    from crud.admin_service import AdminService
+    svc = AdminService(db)
+    svc.seed_ai_providers()
+    return {"message": "AI providers seeded from legacy .env config."}

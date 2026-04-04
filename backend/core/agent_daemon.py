@@ -38,6 +38,7 @@ class DaemonCommand:
     max_tokens: int = 18192
     temperature: float = 0.5
     metadata: Dict[str, Any] = field(default_factory=dict)
+    attachments: Optional[List[Dict[str, Any]]] = None
 
 
 @dataclass
@@ -342,10 +343,12 @@ class AgentDaemon:
                 self._broadcast_sync({"type": "session", "session_id": session_id})
 
             if session_id:
+                # Load history and record user message
                 history_msgs = svc.get_messages(session_id)
                 for m in history_msgs[-100:]:
                     history.append({"role": m.role, "content": m.content})
-                svc.add_message(session_id, "user", cmd.message)
+                att_json = json.dumps(cmd.attachments) if cmd.attachments else None
+                svc.add_message(session_id, "user", cmd.message, attachments=att_json)
         except Exception as e:
             logger.error(f"Failed to load/create session: {e}")
         finally:
@@ -374,6 +377,7 @@ class AgentDaemon:
             for event in run_agent(
                 user_message=cmd.message,
                 history=history,
+                attachments=cmd.attachments,
                 max_tokens=cmd.max_tokens,
                 temperature=cmd.temperature,
                 cancel_event=ctx.cancel_event,

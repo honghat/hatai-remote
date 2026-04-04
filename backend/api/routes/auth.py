@@ -9,7 +9,7 @@ from db.psql.session import get_db
 router = APIRouter()
 
 
-@router.post("/login", response_model=LoginResponse, tags=["Auth"])
+@router.post("/login", tags=["Auth"])
 async def login(data: LoginRequest, db: Session = Depends(get_db)):
     svc = UserService(db)
     user = svc.authenticate_user(data.username, data.password)
@@ -22,8 +22,47 @@ async def login(data: LoginRequest, db: Session = Depends(get_db)):
         data={"sub": str(user.id)},
         expires_delta=timedelta(days=30),
     )
+    
+    # Log activity
+    try:
+        from crud.user_activity_service import UserActivityService
+        UserActivityService(db).log_activity(
+            user_id=user.id,
+            username=user.username,
+            action="Đăng nhập",
+            method="POST",
+            path="/auth/login",
+            details=f"User {user.username} (ID: {user.id}) đã đăng nhập vào hệ thống."
+        )
+    except Exception:
+        pass
+
+    # Build permissions
+    permissions = []
+    role_info = None
+    if user.role:
+        role_info = {
+            "id": user.role.id,
+            "name": user.role.name,
+            "display_name": user.role.display_name,
+        }
+        permissions = [
+            {"resource": p.resource, "action": p.action}
+            for p in user.role.permissions
+        ]
+
     return {
-        "user": user,
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "full_name": user.full_name,
+            "role_id": user.role_id,
+            "is_active": user.is_active,
+            "created_at": str(user.created_at) if user.created_at else None,
+            "role": role_info,
+            "permissions": permissions,
+        },
         "access_token": token,
         "token_type": "bearer",
     }
@@ -38,10 +77,35 @@ async def register(data: UserCreate, db: Session = Depends(get_db)):
     return user
 
 
-@router.get("/me", response_model=UserOut, tags=["Auth"])
+@router.get("/me", tags=["Auth"])
 async def me(user_id: int = Depends(get_current_user), db: Session = Depends(get_db)):
     svc = UserService(db)
     user = svc.get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User không tìm thấy")
-    return user
+
+    # Build permissions list from role
+    permissions = []
+    role_info = None
+    if user.role:
+        role_info = {
+            "id": user.role.id,
+            "name": user.role.name,
+            "display_name": user.role.display_name,
+        }
+        permissions = [
+            {"resource": p.resource, "action": p.action}
+            for p in user.role.permissions
+        ]
+
+    return {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "full_name": user.full_name,
+        "role_id": user.role_id,
+        "is_active": user.is_active,
+        "created_at": user.created_at,
+        "role": role_info,
+        "permissions": permissions,
+    }

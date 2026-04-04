@@ -59,6 +59,7 @@ class RunningTask:
     session_id: Optional[int] = None
     temperature: float = 0.5
     max_tokens: int = 2048
+    attachments: List[Dict[str, Any]] = field(default_factory=list)
 
 
 class TaskRunner:
@@ -88,7 +89,8 @@ class TaskRunner:
         prompt: str, 
         session_id: Optional[int] = None,
         temperature: float = 0.5,
-        max_tokens: int = 2048
+        max_tokens: int = 2048,
+        attachments: Optional[List[Dict[str, Any]]] = None
     ) -> RunningTask:
         """Start a new background task using the agent executor."""
         running = RunningTask(
@@ -98,7 +100,8 @@ class TaskRunner:
             status=TaskStatus.PENDING,
             session_id=session_id,
             temperature=temperature,
-            max_tokens=max_tokens
+            max_tokens=max_tokens,
+            attachments=attachments or []
         )
 
         with self._tasks_lock:
@@ -184,7 +187,7 @@ class TaskRunner:
 
         task.status = TaskStatus.RUNNING
         task.started_at = time.time()
-        self._add_log(task, "text", "🚀 Task started...")
+        # No more "Task started..." log to keep chat clean
         self._update_db(task.task_id, status="running")
 
         db = SessionLocal()
@@ -201,8 +204,9 @@ class TaskRunner:
                 history_msgs = svc.get_messages(task.session_id)
                 for m in history_msgs[-20:]:  # Last 20 messages for context
                     history.append({"role": m.role, "content": m.content})
-                # Add user message to history in DB
-                svc.add_message(task.session_id, "user", task.prompt)
+                # Add user message to history in DB with attachments
+                att_json = json.dumps(task.attachments) if task.attachments else None
+                svc.add_message(task.session_id, "user", task.prompt, attachments=att_json)
             except Exception as e:
                 logger.error(f"Failed to load history for task {task.task_id}: {e}")
 
@@ -213,7 +217,8 @@ class TaskRunner:
                 max_tokens=task.max_tokens or 4096,
                 temperature=task.temperature or 0.5,
                 cancel_event=task.cancel_event,
-                session_id=task.session_id
+                session_id=task.session_id,
+                attachments=task.attachments
             ):
                 if task.cancel_event.is_set():
                     task.status = TaskStatus.CANCELLED

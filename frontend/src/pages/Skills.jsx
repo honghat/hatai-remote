@@ -690,28 +690,32 @@ export default function Skills() {
   const errorCount = skills.filter(s => s.status === 'error').length
 
   return (
-    <div className="flex-1 overflow-y-auto">
-      <div className="max-w-6xl mx-auto px-6 py-8 space-y-8">
-
-        {/* Header */}
+    <div className="flex-1 flex flex-col overflow-hidden">
+      {/* Header */}
+      <div className="px-6 py-5 border-b border-light-200 dark:border-slate-800/60 bg-white/50 dark:bg-transparent">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <div className="p-4 bg-primary-500/10 rounded-2xl shadow-lg shadow-primary-500/5">
-              <Puzzle size={28} className="text-primary-500" />
+            <div className="p-3.5 bg-primary-500/10 rounded-xl shadow-lg shadow-primary-500/5">
+              <Puzzle size={24} className="text-primary-500" />
             </div>
             <div>
-              <h1 className="text-2xl font-black text-light-900 dark:text-white tracking-tight">Kỹ năng Agent</h1>
-              <p className="text-sm text-light-400 dark:text-slate-500 mt-0.5">
-                Công cụ Python tuỳ chỉnh mà Agent có thể sử dụng trong hội thoại
+              <h1 className="text-xl font-extrabold text-light-900 dark:text-white tracking-tight">Kỹ năng Agent</h1>
+              <p className="text-xs text-light-400 dark:text-slate-500 mt-0.5 font-bold uppercase tracking-widest">
+                Custom Python tools & Built-in sensors
               </p>
             </div>
           </div>
           <button onClick={() => setEditSkill({})}
-            className="flex items-center gap-2 px-5 py-2.5 bg-primary-600 hover:bg-primary-700 text-white text-sm font-bold rounded-xl shadow-lg shadow-primary-600/20 transition-all">
-            <Plus size={18} />
+            className="flex items-center gap-2 px-5 py-2.5 bg-primary-600 hover:bg-primary-500 text-white text-xs font-black uppercase tracking-widest rounded-xl shadow-lg shadow-primary-600/20 transition-all active:scale-95">
+            <Plus size={16} />
             Tạo mới
           </button>
         </div>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto custom-scrollbar">
+        <div className="max-w-6xl mx-auto px-6 py-8 space-y-8">
 
         {/* Stats */}
         <div className="grid grid-cols-3 gap-4">
@@ -820,6 +824,7 @@ export default function Skills() {
           onClose={() => setTestSkill(null)}
         />
       )}
+      </div>
     </div>
   )
 }

@@ -10,8 +10,16 @@ import Tasks from './pages/Tasks'
 import Schedules from './pages/Schedules'
 import TerminalPage from './pages/Terminal'
 import Skills from './pages/Skills'
-
 import Project from './pages/Project'
+import ERP from './pages/ERP'
+import Accounting from './pages/Accounting'
+
+// Admin pages
+import AdminDashboard from './pages/admin/AdminDashboard'
+import AdminUsers from './pages/admin/AdminUsers'
+import AdminRoles from './pages/admin/AdminRoles'
+import AdminSettings from './pages/admin/AdminSettings'
+import ActivityLogs from './pages/admin/ActivityLogs'
 
 function App() {
   return (
@@ -35,9 +43,20 @@ function App() {
               <Route path="schedules" element={<Schedules />} />
               <Route path="terminal" element={<TerminalPage />} />
               <Route path="skills" element={<Skills />} />
+              <Route path="erp" element={<ERP />} />
+              <Route path="accounting" element={<Accounting />} />
+              <Route path="project" element={<Project />} />
+
+              {/* Admin routes */}
+              <Route path="admin" element={<AdminDashboard />} />
+              <Route path="admin/users" element={<AdminUsers />} />
+              <Route path="admin/roles" element={<AdminRoles />} />
+              <Route path="admin/settings" element={<AdminSettings />} />
+              <Route path="admin/activities" element={<ActivityLogs />} />
+
               <Route path="*" element={<Navigate to="/chat" replace />} />
             </Route>
-            <Route path="/project" element={<PrivateRoute><Project /></PrivateRoute>} />
+
             <Route path="*" element={<Navigate to="/chat" replace />} />
           </Routes>
         </BrowserRouter>

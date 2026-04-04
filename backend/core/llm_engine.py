@@ -5,6 +5,7 @@ Supports:
   - Gemini: Google Gemini API (gemini-2.0-flash, etc.)
   - Ollama: Local Ollama instance
   - OpenAI: OpenAI-compatible API (llama-cpp server, vLLM, default set to user's HTTP URL)
+  - DeepSeek: DeepSeek Official API
 
 Singleton with runtime provider switching.
 """
@@ -45,8 +46,12 @@ class LLMEngine:
     _openai_ready = False
     _openai_error: Optional[str] = None
 
+    # DeepSeek state
+    _deepseek_ready = False
+    _deepseek_error: Optional[str] = None
+
     # Active provider
-    _provider: str = config.LLM_PROVIDER  # "local", "gemini", "ollama", or "openai"
+    _provider: str = config.LLM_PROVIDER  # "local", "gemini", "ollama", "openai", "deepseek"
 
     @classmethod
     def get(cls) -> "LLMEngine":
@@ -73,11 +78,14 @@ class LLMEngine:
         if config.OPENAI_API_BASE:
             self._openai_ready = False
             self._init_openai()
+        if config.DEEPSEEK_API_KEY:
+            self._deepseek_ready = False
+            self._init_deepseek()
 
     def set_provider(self, provider: str) -> dict:
         """Switch active LLM provider at runtime."""
-        if provider not in ("local", "gemini", "ollama", "openai"):
-            return {"error": f"Unknown provider: {provider}. Use 'local', 'gemini', 'ollama' or 'openai'"}
+        if provider not in ("local", "gemini", "ollama", "openai", "deepseek"):
+            return {"error": f"Unknown provider: {provider}. Use 'local', 'gemini', 'ollama', 'openai' or 'deepseek'"}
 
         old = self._provider
         self._provider = provider
@@ -90,6 +98,8 @@ class LLMEngine:
             self._init_ollama()
         elif provider == "openai" and not self._openai_ready:
             self._init_openai()
+        elif provider == "deepseek" and not self._deepseek_ready:
+            self._init_deepseek()
         elif provider == "local" and not self._local_loaded:
             return {
                 "message": f"Switched to {provider}",
@@ -101,10 +111,55 @@ class LLMEngine:
             "ready": self.is_ready,
         }
 
+    def load_from_db(self):
+        """Load the active provider and its configuration from the database."""
+        from db.psql.session import SessionLocal
+        from db.psql.models.ai_provider import AIProvider
+        db = SessionLocal()
+        try:
+            active = db.query(AIProvider).filter(AIProvider.is_active == True).first()
+            if active:
+                logger.info(f"📍 Applying Active Neural Source: {active.name} ({active.provider_type})")
+                self._provider = active.provider_type
+                
+                # Dynamically update config for this runtime session
+                if active.provider_type == "gemini":
+                    config.GEMINI_API_KEY = active.api_key
+                    config.GEMINI_MODEL = active.model_name
+                    self._gemini_ready = False
+                    self._init_gemini()
+                elif active.provider_type == "ollama":
+                    config.OLLAMA_URL = active.api_base
+                    config.OLLAMA_MODEL = active.model_name
+                    self._ollama_ready = False
+                    self._init_ollama()
+                elif active.provider_type == "openai":
+                    config.OPENAI_API_BASE = active.api_base
+                    config.OPENAI_API_KEY = active.api_key
+                    config.OPENAI_MODEL = active.model_name
+                    self._openai_ready = False
+                    self._init_openai()
+                elif active.provider_type == "deepseek":
+                    config.DEEPSEEK_API_KEY = active.api_key
+                    config.DEEPSEEK_MODEL = active.model_name
+                    self._deepseek_ready = False
+                    self._init_deepseek()
+                
+                return {"success": True, "provider": active.provider_type}
+        except Exception as e:
+            logger.error(f"❌ Failed to load provider from DB: {e}")
+        finally:
+            db.close()
+        return {"success": False}
+
     # ── Loading ─────────────────────────────────────────────────────────────
 
     def load(self):
-        """Load LOCAL model into memory (call once at startup)."""
+        """Load active provider from DB and LOCAL model into memory."""
+        # 1. Try to load active provider and its config from Database
+        self.load_from_db()
+
+        # 2. Load Local Model if needed (llama-cpp)
         if self._local_loaded or self._local_loading:
             return
         self._local_loading = True
@@ -113,30 +168,31 @@ class LLMEngine:
             from llama_cpp import Llama
             import multiprocessing
             n_threads = max(1, multiprocessing.cpu_count() // 2)
-            logger.info(f"⏳ Loading local model: {config.MODEL_PATH} (threads={n_threads})")
+            logger.info(f"⏳ Loading core local model: {config.MODEL_PATH}")
             self._llm = Llama(
                 model_path=config.MODEL_PATH,
                 n_gpu_layers=config.MODEL_N_GPU_LAYERS,
                 n_ctx=config.MODEL_N_CTX,
                 n_threads=n_threads,
-                n_batch=256,
                 verbose=False,
             )
             self._local_loaded = True
-            logger.info("✅ Local model loaded successfully.")
+            logger.info("✅ Local model ready.")
         except Exception as e:
             self._local_error = str(e)
-            logger.error(f"❌ Failed to load local model: {e}")
+            logger.error(f"❌ Core local model failed: {e}")
         finally:
             self._local_loading = False
 
-        # Also init Gemini if key is available
+        # Also init APIs if keys are available
         if config.GEMINI_API_KEY:
             self._init_gemini()
         if config.OLLAMA_URL:
             self._init_ollama()
         if config.OPENAI_API_BASE:
             self._init_openai()
+        if config.DEEPSEEK_API_KEY:
+            self._init_deepseek()
 
     def _init_gemini(self):
         """Initialize Gemini API client."""
@@ -181,6 +237,17 @@ class LLMEngine:
         self._openai_ready = True
         logger.info(f"✅ OpenAI API compatible configuration loaded ({config.OPENAI_API_BASE})")
 
+    def _init_deepseek(self):
+        """Initialize DeepSeek API compatible setup."""
+        if self._deepseek_ready:
+            return
+        if not config.DEEPSEEK_API_KEY:
+            self._deepseek_error = "DEEPSEEK_API_KEY not set in .env"
+            logger.warning("⚠️ DeepSeek API key not configured")
+            return
+        self._deepseek_ready = True
+        logger.info(f"✅ DeepSeek API configuration loaded")
+
     # ── Status ──────────────────────────────────────────────────────────────
 
     @property
@@ -191,6 +258,8 @@ class LLMEngine:
             return self._ollama_ready
         elif self._provider == "openai":
             return self._openai_ready
+        elif self._provider == "deepseek":
+            return self._deepseek_ready
         return self._local_loaded and self._llm is not None
 
     @property
@@ -223,6 +292,12 @@ class LLMEngine:
                 "api_base": config.OPENAI_API_BASE,
                 "model": config.OPENAI_MODEL,
             },
+            "deepseek": {
+                "ready": self._deepseek_ready,
+                "error": self._deepseek_error,
+                "model": config.DEEPSEEK_MODEL,
+                "api_key_set": bool(config.DEEPSEEK_API_KEY),
+            },
         }
 
     # ── Chat methods ────────────────────────────────────────────────────────
@@ -253,6 +328,8 @@ class LLMEngine:
             yield from self._ollama_stream(messages, max_tokens, temperature)
         elif self._provider == "openai":
             yield from self._openai_stream(messages, max_tokens, temperature)
+        elif self._provider == "deepseek":
+            yield from self._deepseek_stream(messages, max_tokens, temperature)
         else:
             yield from self._local_stream(messages, max_tokens, temperature)
 
@@ -272,6 +349,8 @@ class LLMEngine:
             return self._ollama_sync(messages, max_tokens, temperature)
         elif self._provider == "openai":
             return self._openai_sync(messages, max_tokens, temperature)
+        elif self._provider == "deepseek":
+            return self._deepseek_sync(messages, max_tokens, temperature)
         else:
             return self._local_sync(messages, max_tokens, temperature)
 
@@ -329,6 +408,42 @@ class LLMEngine:
         system_instruction = None
         contents = []
 
+        def _get_image_data(url):
+            """Helper to get mime_type and base64 from a URL or local path."""
+            import base64
+            import mimetypes
+
+            # 1. Handle Data URLs (Already Base64)
+            if url.startswith("data:image/") and "," in url:
+                header, b64data = url.split(",", 1)
+                mime_type = header.split(";")[0].replace("data:", "")
+                return mime_type, b64data
+
+            # 2. Handle Local File Paths or Relative Media URLs
+            path = None
+            if os.path.exists(url):
+                path = url
+            elif url.startswith("/uploads/"):
+                path = os.path.join("uploads", url.replace("/uploads/", ""))
+            elif url.startswith("/api/uploads/"):
+                path = os.path.join("uploads", url.replace("/api/uploads/", ""))
+            elif url.startswith("/ai/media/"):
+                path = os.path.join("media", url.replace("/ai/media/", ""))
+            elif url.startswith("/api/ai/media/"):
+                path = os.path.join("media", url.replace("/api/ai/media/", ""))
+
+            if path and os.path.exists(path):
+                try:
+                    mime_type, _ = mimetypes.guess_type(path)
+                    mime_type = mime_type or "image/png"
+                    with open(path, "rb") as f:
+                        b64data = base64.b64encode(f.read()).decode("utf-8")
+                    return mime_type, b64data
+                except Exception as e:
+                    logger.error(f"❌ Failed to read image at {path}: {e}")
+
+            return None, None
+
         def _content_to_parts(content):
             """Convert OpenAI content (str or list) to Gemini parts list."""
             if isinstance(content, str):
@@ -342,9 +457,8 @@ class LLMEngine:
                     parts.append({"text": block.get("text", "")})
                 elif btype == "image_url":
                     url = block.get("image_url", {}).get("url", "")
-                    if url.startswith("data:image/") and "," in url:
-                        header, b64data = url.split(",", 1)
-                        mime_type = header.split(";")[0].replace("data:", "")
+                    mime_type, b64data = _get_image_data(url)
+                    if b64data:
                         parts.append({
                             "inline_data": {
                                 "mime_type": mime_type,
@@ -435,10 +549,39 @@ class LLMEngine:
             return response.text or "[Empty response from Gemini]"
         except Exception as e:
             logger.error(f"❌ Gemini sync error: {e}")
+            return f"[ERROR] Gemini API error: {str(e)}"
+
     # ── Ollama API implementations ──────────────────────────────────────────
 
     def _convert_messages_for_ollama(self, messages: List[Dict[str, Any]]):
         """Convert OpenAI-style multimodal messages to Ollama format."""
+        import base64
+        import os
+
+        def _get_image_b64(url):
+            if url.startswith("data:image/") and "," in url:
+                return url.split(",", 1)[1]
+            
+            path = None
+            if os.path.exists(url):
+                path = url
+            elif url.startswith("/uploads/"):
+                path = os.path.join("uploads", url.replace("/uploads/", ""))
+            elif url.startswith("/api/uploads/"):
+                path = os.path.join("uploads", url.replace("/api/uploads/", ""))
+            elif url.startswith("/ai/media/"):
+                path = os.path.join("media", url.replace("/ai/media/", ""))
+            elif url.startswith("/api/ai/media/"):
+                path = os.path.join("media", url.replace("/api/ai/media/", ""))
+
+            if path and os.path.exists(path):
+                try:
+                    with open(path, "rb") as f:
+                        return base64.b64encode(f.read()).decode("utf-8")
+                except:
+                    pass
+            return None
+
         ollama_msgs = []
         for msg in messages:
             content = msg.get("content")
@@ -450,9 +593,11 @@ class LLMEngine:
                     if block.get("type") == "text":
                         text_parts.append(block.get("text", ""))
                     elif block.get("type") == "image_url":
-                        b64_url = block.get("image_url", {}).get("url", "")
-                        if "," in b64_url:
-                            images.append(b64_url.split(",")[1])
+                        url = block.get("image_url", {}).get("url", "")
+                        b64 = _get_image_b64(url)
+                        if b64:
+                            images.append(b64)
+                
                 new_msg = {
                     "role": msg["role"],
                     "content": "\n".join(text_parts)
@@ -491,7 +636,7 @@ class LLMEngine:
             "model": config.OLLAMA_MODEL,
             "prompt": prompt,
             "stream": stream,
-            "raw": True, # Ignore the model's internal confusing templates, just execute
+            "raw": True,
             "options": {
                 "temperature": temperature,
                 "num_predict": max_tokens,
@@ -500,8 +645,6 @@ class LLMEngine:
         }
         
         if all_images:
-            # OPTIMIZATION: Only send the LAST 1 image to Ollama to save massive GPU compute time. 
-            # Otherwise 5 screenshots = 5x slower TTFT.
             payload["images"] = all_images[-1:]
             
         return payload
@@ -520,16 +663,12 @@ class LLMEngine:
                         content = chunk.get("response", "")
                         if content:
                             yield content
-                        # Track finish_reason from Ollama done_reason field
                         if chunk.get("done"):
                             done_reason = chunk.get("done_reason", "stop")
                             self._last_finish_reason = "length" if done_reason == "length" else "stop"
         except Exception as e:
             logger.error(f"❌ Ollama stream error: {e}")
-            err_msg = str(e)
-            if "timeout" in err_msg.lower():
-                err_msg = "Ollama timed out (300s). Model might be too heavy or loading from disk. Try again or check server resources."
-            yield f"[ERROR] Ollama API error: {err_msg}"
+            yield f"[ERROR] Ollama API error: {str(e)}"
 
     def _ollama_sync(self, messages, max_tokens, temperature):
         import requests
@@ -543,75 +682,99 @@ class LLMEngine:
             return data.get("response", "[Empty response from Ollama]")
         except Exception as e:
             logger.error(f"❌ Ollama sync error: {e}")
-            err_msg = str(e)
-            if "timeout" in err_msg.lower():
-                err_msg = "Ollama timed out (300s). Try again or consider a smaller model."
-            return f"[ERROR] Ollama API error: {err_msg}"
+            return f"[ERROR] Ollama API error: {str(e)}"
 
     # ── OpenAI API implementations (llama-cpp-python server / vLLM) ─────────
 
     def _convert_messages_for_openai(self, messages: List[Dict[str, Any]]):
-        """Convert multimodal messages to OpenAI format.
-        IMPORTANT: llama-cpp server needs mmproj for images. If not provided, images cause 500 error.
-        We will strip images for OpenAI provider for now to avoid crashes.
-        """
+        """Convert multimodal messages to OpenAI format."""
+        import base64
+        import os
+        import mimetypes
+
+        def _get_image_data_uri(url):
+            if url.startswith("data:image/") and "," in url:
+                return url
+            
+            path = None
+            if os.path.exists(url):
+                path = url
+            elif url.startswith("/uploads/"):
+                path = os.path.join("uploads", url.replace("/uploads/", ""))
+            elif url.startswith("/api/uploads/"):
+                path = os.path.join("uploads", url.replace("/api/uploads/", ""))
+            elif url.startswith("/ai/media/"):
+                path = os.path.join("media", url.replace("/ai/media/", ""))
+            elif url.startswith("/api/ai/media/"):
+                path = os.path.join("media", url.replace("/api/ai/media/", ""))
+
+            if path and os.path.exists(path):
+                try:
+                    mime_type, _ = mimetypes.guess_type(path)
+                    mime_type = mime_type or "image/png"
+                    with open(path, "rb") as f:
+                        b64 = base64.b64encode(f.read()).decode("utf-8")
+                    return f"data:{mime_type};base64,{b64}"
+                except:
+                    pass
+            return None
+
         openai_msgs = []
         for msg in messages:
             content = msg.get("content")
             if isinstance(content, list):
-                # If content is a list [ {type: text, text: ...}, {type: image_url, ...} ]
-                # We strip images for OpenAI because the remote server lacks mmproj
-                text_only = ""
+                new_content = []
                 for block in content:
                     if block.get("type") == "text":
-                        text_only += block.get("text", "") + "\n"
+                        new_content.append(block)
+                    elif block.get("type") == "image_url":
+                        url = block.get("image_url", {}).get("url", "")
+                        data_uri = _get_image_data_uri(url)
+                        if data_uri:
+                            new_content.append({
+                                "type": "image_url",
+                                "image_url": {"url": data_uri}
+                            })
                 
                 openai_msgs.append({
                     "role": msg["role"],
-                    "content": text_only.strip()
+                    "content": new_content
                 })
             else:
                 openai_msgs.append(msg)
         return openai_msgs
 
-    def _openai_stream(self, messages, max_tokens, temperature):
+    def _generic_openai_stream(self, messages, max_tokens, temperature, base_url, api_key, model_name):
         import requests
 
         headers = {
             "Content-Type": "application/json",
             "Accept": "text/event-stream",
-            "Authorization": f"Bearer {config.OPENAI_API_KEY}"
+            "Authorization": f"Bearer {api_key}"
         }
 
-        # Ensure content is compatible and fits in context
         openai_messages = self._convert_messages_for_openai(messages)
 
         payload = {
-            "model": config.OPENAI_MODEL,
+            "model": model_name,
             "messages": openai_messages,
             "stream": True,
             "max_tokens": max_tokens,
             "temperature": temperature,
-            "presence_penalty": 0.1,
-            "frequency_penalty": 0.1,
         }
 
-        self._context_overflow = False
         try:
-            with requests.post(f"{config.OPENAI_API_BASE.rstrip('/')}/chat/completions", headers=headers, json=payload, stream=True, timeout=(10, 300)) as resp:
+            with requests.post(f"{base_url.rstrip('/')}/chat/completions", headers=headers, json=payload, stream=True, timeout=(10, 300)) as resp:
                 if resp.status_code >= 400:
-                    # ... (rest of error handling left untouched)
+                    yield f"[ERROR] API {resp.status_code}: {resp.text}"
                     return
                 
-                logger.info(f"📡 OpenAI ({config.OPENAI_MODEL}) stream started...")
-                token_count = 0
                 for line in resp.iter_lines():
                     if line:
                         line = line.decode("utf-8")
                         if line.startswith("data:"):
                             data_str = line[5:].strip()
                             if data_str == "[DONE]":
-                                logger.info(f"🏁 Stream complete ({token_count} tokens)")
                                 break
                             
                             try:
@@ -621,41 +784,34 @@ class LLMEngine:
                                     continue
                                 
                                 choice = choices[0]
-                                fr = choice.get("finish_reason")
-                                if fr:
-                                    self._last_finish_reason = fr
-                                
                                 delta = choice.get("delta", {})
                                 
-                                # 1. Handle regular content
                                 content = delta.get("content", "")
                                 if content:
-                                    token_count += 1
                                     yield content
                                 
-                                # 2. Handle reasoning_content (DeepSeek/Qwen spec)
                                 reasoning = delta.get("reasoning_content", "")
                                 if reasoning:
                                     yield f"<think>{reasoning}</think>"
                                     
-                            except (json.JSONDecodeError, KeyError, IndexError):
+                            except:
                                 continue
         except Exception as e:
-            logger.error(f"❌ OpenAI stream error: {e}")
-            yield f"[ERROR] OpenAI API error: {str(e)}"
+            logger.error(f"❌ OpenAI-compatible stream error: {e}")
+            yield f"[ERROR] API error: {str(e)}"
 
-    def _openai_sync(self, messages, max_tokens, temperature):
+    def _generic_openai_sync(self, messages, max_tokens, temperature, base_url, api_key, model_name):
         import requests
 
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {config.OPENAI_API_KEY}"
+            "Authorization": f"Bearer {api_key}"
         }
 
         openai_messages = self._convert_messages_for_openai(messages)
 
         payload = {
-            "model": config.OPENAI_MODEL,
+            "model": model_name,
             "messages": openai_messages,
             "stream": False,
             "max_tokens": max_tokens,
@@ -663,10 +819,7 @@ class LLMEngine:
         }
 
         try:
-            resp = requests.post(f"{config.OPENAI_API_BASE.rstrip('/')}/chat/completions", headers=headers, json=payload, timeout=(10, 300))
-            if resp.status_code == 400:
-                err_json = resp.json()
-                return f"[ERROR] OpenAI API 400: {err_json.get('error', {}).get('message', 'Bad Request')}"
+            resp = requests.post(f"{base_url.rstrip('/')}/chat/completions", headers=headers, json=payload, timeout=(10, 300))
             resp.raise_for_status()
             data = resp.json()
             choices = data.get("choices", [])
@@ -681,8 +834,20 @@ class LLMEngine:
                 if content:
                     final_text += content
                     
-                return final_text if final_text else "[Empty response from OpenAI]"
-            return "[Empty response from OpenAI]"
+                return final_text if final_text else "[Empty response]"
+            return "[Empty response]"
         except Exception as e:
-            logger.error(f"❌ OpenAI sync error: {e}")
-            return f"[ERROR] OpenAI API error: {str(e)}"
+            logger.error(f"❌ OpenAI-compatible sync error: {e}")
+            return f"[ERROR] API error: {str(e)}"
+
+    def _openai_stream(self, messages, max_tokens, temperature):
+        yield from self._generic_openai_stream(messages, max_tokens, temperature, config.OPENAI_API_BASE, config.OPENAI_API_KEY, config.OPENAI_MODEL)
+
+    def _openai_sync(self, messages, max_tokens, temperature):
+        return self._generic_openai_sync(messages, max_tokens, temperature, config.OPENAI_API_BASE, config.OPENAI_API_KEY, config.OPENAI_MODEL)
+
+    def _deepseek_stream(self, messages, max_tokens, temperature):
+        yield from self._generic_openai_stream(messages, max_tokens, temperature, "https://api.deepseek.com", config.DEEPSEEK_API_KEY, config.DEEPSEEK_MODEL)
+
+    def _deepseek_sync(self, messages, max_tokens, temperature):
+        return self._generic_openai_sync(messages, max_tokens, temperature, "https://api.deepseek.com", config.DEEPSEEK_API_KEY, config.DEEPSEEK_MODEL)

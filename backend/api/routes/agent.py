@@ -16,7 +16,7 @@ import asyncio
 import json
 import os
 import threading
-from typing import AsyncGenerator, Optional, Dict, Any
+from typing import AsyncGenerator, Optional, Dict, Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, FileResponse
@@ -49,6 +49,7 @@ class DaemonSendRequest(BaseModel):
     session_id: Optional[int] = None
     max_tokens: int = 8192
     temperature: float = 0.5
+    attachments: Optional[List[dict]] = None
 
 
 # ── Daemon Endpoints ──────────────────────────────────────────────────────────
@@ -97,6 +98,7 @@ async def daemon_send(
         session_id=session_id,
         max_tokens=body.max_tokens,
         temperature=body.temperature,
+        attachments=body.attachments,
     )
     daemon.send_command(cmd)
     return {
@@ -312,8 +314,9 @@ async def agent_run(
     for m in history_msgs[-100:]:
         history.append({"role": m.role, "content": m.content})
 
-    # Save user message
-    svc.add_message(session.id, "user", body.message)
+    # Save user message with attachments
+    att_json = json.dumps(body.attachments) if body.attachments else None
+    svc.add_message(session.id, "user", body.message, attachments=att_json)
 
     async def event_generator() -> AsyncGenerator[str, None]:
         yield f"data: {json.dumps({'type': 'session', 'session_id': session.id})}\n\n"

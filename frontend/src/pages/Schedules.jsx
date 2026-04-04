@@ -155,7 +155,6 @@ export default function Schedules() {
   }
 
   const handleDelete = async (id) => {
-    if (!confirm('Bạn có chắc muốn xoá tác vụ định kỳ này?')) return
     try {
       await api.delete(`/schedules/${id}`)
       setSchedules(prev => prev.filter(s => s.id !== id))
@@ -165,26 +164,33 @@ export default function Schedules() {
   }
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="max-w-4xl mx-auto p-6 space-y-6">
-        {/* Header */}
+    <div className="flex-1 flex flex-col overflow-hidden">
+      {/* Header */}
+      <div className="px-6 py-5 border-b border-light-200 dark:border-slate-800/60 bg-white/50 dark:bg-transparent">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-4">
             <div className="w-10 h-10 bg-primary-600 dark:bg-primary-600/20 border border-primary-500/20 rounded-xl flex items-center justify-center shadow-lg shadow-primary-600/10">
               <Clock size={20} className="text-white dark:text-primary-400" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-light-900 dark:text-white">Tác vụ Định kỳ</h1>
-              <p className="text-xs text-light-500 dark:text-slate-500">Task định kỳ chạy tự động theo lịch</p>
+              <h1 className="text-xl font-extrabold text-light-900 dark:text-white tracking-tight">Tác vụ Định kỳ</h1>
+              <p className="text-xs text-light-400 dark:text-slate-500 mt-0.5 font-bold uppercase tracking-widest">
+                Automated tasks & Cron management
+              </p>
             </div>
           </div>
           <button
             onClick={openCreateModal}
-            className="flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-xl text-sm font-bold transition-all shadow-lg shadow-primary-500/20"
+            className="flex items-center gap-2 px-5 py-2.5 bg-primary-600 hover:bg-primary-500 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-primary-500/20 active:scale-95"
           >
             <Plus size={16} /> Tạo mới
           </button>
         </div>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto custom-scrollbar">
+        <div className="max-w-4xl mx-auto p-6 space-y-8">
 
         {/* Schedule List */}
         {loading ? (
@@ -407,6 +413,7 @@ export default function Schedules() {
           </div>
         </div>
       )}
+      </div>
     </div>
   )
 }

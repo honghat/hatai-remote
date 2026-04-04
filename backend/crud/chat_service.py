@@ -38,14 +38,35 @@ class ChatService:
         session = self.get_session(session_id, user_id)
         if not session:
             return False
-        # delete messages first
+            
+        import os, json
+        # 1. Identify all attachments in this session to delete files
+        messages = self.get_messages(session_id)
+        for msg in messages:
+            if msg.attachments:
+                try:
+                    att_list = json.loads(msg.attachments)
+                    for att in att_list:
+                        if "url" in att:
+                            # Resolve path: /uploads/uuid.png -> uploads/uuid.png
+                            rel_path = att["url"].lstrip("/")
+                            if os.path.exists(rel_path):
+                                try:
+                                    os.remove(rel_path)
+                                except Exception:
+                                    pass
+                except Exception:
+                    pass
+
+        # 2. Delete messages first
         self.db.query(ChatMessage).filter(ChatMessage.session_id == session_id).delete()
+        # 3. Delete session
         self.db.delete(session)
         self.db.commit()
         return True
 
-    def add_message(self, session_id: int, role: str, content: str) -> ChatMessage:
-        msg = ChatMessage(session_id=session_id, role=role, content=content)
+    def add_message(self, session_id: int, role: str, content: str, attachments: Optional[str] = None) -> ChatMessage:
+        msg = ChatMessage(session_id=session_id, role=role, content=content, attachments=attachments)
         self.db.add(msg)
         # update session updated_at
         self.db.query(ChatSession).filter(ChatSession.id == session_id).update(

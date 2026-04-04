@@ -13,11 +13,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from core.config import ALLOWED_ORIGINS
 from core.llm_engine import LLMEngine
 
-from api.routes import auth, ai, code, agent, memory, tasks, skills, schedules, ssh
+from api.routes import auth, ai, code, agent, memory, tasks, skills, schedules, ssh, admin, erp, accounting
 
 # DB initialization
 from db.psql.session import engine, Base
-from db.psql.models import user, chat, code as code_models, task, scheduled_task, ssh_connection  # noqa: F401
+from db.psql.models import user, chat, code as code_models, task, scheduled_task, ssh_connection, role, user_activity  # noqa: F401
 
 import os
 # Ensure data dir exists
@@ -35,9 +35,24 @@ logger = logging.getLogger("HatAI-Remote")
 
 
 def create_tables():
-    """Create all tables if they don't exist."""
+    """Create all tables if they don't exist, then seed default roles & permissions."""
     Base.metadata.create_all(bind=engine)
     logger.info("✅ Database tables created/verified.")
+
+    # Seed default roles & permissions
+    from crud.admin_service import AdminService
+    from db.psql.session import SessionLocal
+    db = SessionLocal()
+    try:
+        admin_svc = AdminService(db)
+        admin_svc.seed_defaults()
+        logger.info("✅ Default roles & permissions seeded.")
+        
+        # Seed AI Providers from .env if empty
+        admin_svc.seed_ai_providers()
+        logger.info("✅ AI Providers initialized.")
+    finally:
+        db.close()
 
 
 def load_model_background():
@@ -91,6 +106,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Audit Log Middleware
+from middleware.audit_log import AuditLogMiddleware
+app.add_middleware(AuditLogMiddleware)
+
 # Static Files
 from fastapi.staticfiles import StaticFiles
 os.makedirs("uploads", exist_ok=True)
@@ -106,6 +125,9 @@ app.include_router(memory.router, tags=["Memory"])
 app.include_router(skills.router, tags=["Skills"])
 app.include_router(schedules.router, prefix="/schedules", tags=["Schedules"])
 app.include_router(ssh.router, prefix="/ssh", tags=["SSH"])
+app.include_router(admin.router, prefix="/admin", tags=["Admin"])
+app.include_router(erp.router, prefix="/erp", tags=["ERP"])
+app.include_router(accounting.router, prefix="/accounting", tags=["Accounting"])
 
 @app.get("/health", tags=["System"])
 def health():

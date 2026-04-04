@@ -13,6 +13,7 @@ class ChatMessageOut(BaseModel):
     session_id: int
     role: str
     content: str
+    attachments: Optional[str] = None
     created_at: datetime
 
     class Config:

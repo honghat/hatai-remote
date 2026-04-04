@@ -8,6 +8,7 @@ class AITaskCreate(BaseModel):
     session_id: Optional[int] = None
     temperature: Optional[float] = 0.5
     max_tokens: Optional[int] = 2048
+    attachments: Optional[List[Dict[str, Any]]] = None
 
 
 class AITaskOut(BaseModel):

@@ -1,5 +1,6 @@
 from hashlib import sha256
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Unicode
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Unicode, ForeignKey
+from sqlalchemy.orm import relationship
 import datetime
 from db.psql.session import Base
 
@@ -12,7 +13,7 @@ class User(Base):
     password = Column(String(255), nullable=False)
     email = Column(String(255), unique=True, index=True, nullable=True)
     full_name = Column(Unicode(255), nullable=True)
-    role_id = Column(Integer, default=2)  # 1=admin, 2=user
+    role_id = Column(Integer, ForeignKey("roles.id"), default=None, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=lambda: datetime.datetime.now(datetime.UTC))
     updated_at = Column(
@@ -20,6 +21,8 @@ class User(Base):
         default=lambda: datetime.datetime.now(datetime.UTC),
         onupdate=lambda: datetime.datetime.now(datetime.UTC),
     )
+
+    role = relationship("Role", lazy="joined")
 
     def __repr__(self):
         return f"<User(username={self.username}, role_id={self.role_id})>"

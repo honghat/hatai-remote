@@ -322,12 +322,10 @@ export default function Brain() {
   }
 
   const deletePreference = async (key) => {
-    if (!confirm(`Delete preference "${key}"?`)) return
     try { await api.delete(`/memory/preferences/${key}`); fetchData() } catch {}
   }
 
   const deleteKnowledgeTopic = async (topic) => {
-    if (!confirm(`Delete ENTIRE topic "${topic}"?`)) return
     try { await api.delete(`/memory/knowledge/${topic}`); fetchData() } catch {}
   }
 
@@ -350,9 +348,37 @@ export default function Brain() {
   const totalKnowledge = b.knowledge?.topics?.reduce((acc, t) => acc + t.count, 0) || 0
 
   return (
-    <div className="flex-1 overflow-y-auto bg-[#F8FAFC] dark:bg-[#030711] p-6 lg:p-10 space-y-12 custom-scrollbar">
-      {/* Dynamic Header */}
-      <div className="relative">
+    <div className="flex-1 flex flex-col overflow-hidden">
+      {/* Header */}
+      <div className="px-6 py-5 border-b border-light-200 dark:border-slate-800/60 bg-white/50 dark:bg-transparent">
+        <div className="flex items-center gap-4">
+          <div className="w-10 h-10 rounded-xl bg-primary-600 flex items-center justify-center shadow-lg shadow-primary-500/20">
+            <BrainIcon size={20} className="text-white" />
+          </div>
+          <div className="flex-1">
+            <h1 className="text-xl font-extrabold text-light-900 dark:text-white tracking-tight">
+              HatAI Brain Central
+            </h1>
+            <p className="text-xs text-light-400 dark:text-slate-500 mt-0.5 uppercase tracking-widest font-bold">
+              Neural interface & Memory management
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <button onClick={fetchData} title="Sync Synapses" className="p-2.5 text-light-500 dark:text-slate-400 hover:text-primary-500 bg-white dark:bg-dark-900 border border-light-200 dark:border-slate-800 rounded-xl transition-all shadow-sm">
+              <RefreshCw size={20} />
+            </button>
+            <button onClick={() => setShowTeach(true)} className="flex items-center gap-2 bg-primary-600 text-white px-4 py-2.5 rounded-xl hover:bg-primary-500 transition-all font-bold text-xs shadow-lg shadow-primary-600/20 active:scale-95 group">
+              <GraduationCap size={16} />
+              INJECT DATA
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto bg-[#F8FAFC] dark:bg-[#030711] p-6 lg:p-10 space-y-12 custom-scrollbar">
+        {/* Dynamic Header Stats */}
+        <div className="relative">
         <div className="absolute -top-24 -left-24 w-96 h-96 bg-primary-500/10 blur-[120px] rounded-full pointer-events-none" />
         <div className="absolute -bottom-24 -right-24 w-96 h-96 bg-primary-500/10 blur-[120px] rounded-full pointer-events-none" />
         
@@ -391,19 +417,18 @@ export default function Brain() {
         </div>
 
         {/* Quick Stats Grid */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 animate-fade-in">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-fade-in">
           <StatTile label="Knowledge Chunks" value={totalKnowledge} icon={Database} colorClass="text-blue-500" />
           <StatTile label="Personality State" value={b.soul?.content ? 'DEFINED' : 'VACUUM'} icon={Heart} colorClass="text-pink-500" />
           <StatTile label="Preferences" value={Object.keys(b.preferences || {}).length} icon={User} colorClass="text-primary-500" />
-          <StatTile label="Scratchpad Load" value={`${b.scratchpad?.size || 0} bytes`} icon={Cpu} colorClass="text-orange-500" />
         </div>
       </div>
 
       {/* Main Neural Map */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 lg:gap-10">
         
-        {/* Left Column: Core Identity */}
-        <div className="xl:col-span-8 space-y-8 lg:space-y-10">
+        {/* Core Identity */}
+        <div className="xl:col-span-12 space-y-8 lg:space-y-10">
           <Card title="Personality Core (soul_memory.md)" icon={Heart} color="pink" 
             isOpen={openSections.soul} onToggle={() => toggleSection('soul')}
             extra={!editingSoul && (
@@ -417,8 +442,8 @@ export default function Brain() {
                   <div className="relative group">
                     <div className="absolute top-4 left-4 p-2 bg-pink-500/10 rounded-lg text-pink-500 opacity-50"><Terminal size={14} /></div>
                     <textarea value={soulDraft} onChange={e => setSoulDraft(e.target.value)}
-                      rows={16}
-                      className="w-full bg-light-50/50 dark:bg-dark-950/50 border border-pink-500/20 rounded-[2rem] px-8 py-10 md:pl-14 text-sm text-light-800 dark:text-slate-300 font-mono focus:border-pink-500/50 outline-none transition-all shadow-inner leading-relaxed custom-scrollbar" />
+                      rows={8}
+                      className="w-full bg-light-50/50 dark:bg-dark-950/50 border border-pink-500/20 rounded-[2rem] px-8 py-8 md:pl-14 text-xs text-light-800 dark:text-slate-300 font-mono focus:border-pink-500/50 outline-none transition-all shadow-inner leading-relaxed custom-scrollbar" />
                   </div>
                   <div className="flex justify-end items-center gap-6">
                     <button onClick={() => { setEditingSoul(false); setSoulDraft(b.soul?.content || '') }} className="text-xs font-black text-light-400 hover:text-light-900 dark:hover:text-white transition-colors uppercase tracking-[0.2em]">ABORT</button>
@@ -430,7 +455,7 @@ export default function Brain() {
               ) : (
                 <div className="relative group overflow-hidden">
                   <div className="absolute inset-0 bg-pink-500/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
-                  <div className="bg-light-50/10 dark:bg-dark-950/20 rounded-3xl p-8 border border-light-200/50 dark:border-slate-800/40 font-mono text-[13px] text-light-800 dark:text-slate-300 whitespace-pre-wrap leading-loose max-h-[500px] overflow-y-auto custom-scrollbar shadow-inner">
+                  <div className="bg-light-50/10 dark:bg-dark-950/20 rounded-3xl p-6 border border-light-200/50 dark:border-slate-800/40 font-mono text-xs text-light-800 dark:text-slate-300 whitespace-pre-wrap leading-relaxed max-h-[250px] overflow-y-auto custom-scrollbar shadow-inner">
                     {b.soul?.content || 'Soul vacuum detected. AI is currently in default blank state.'}
                   </div>
                 </div>
@@ -438,71 +463,11 @@ export default function Brain() {
             </div>
           </Card>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-             {/* Hide Scratchpad from UI as requested by user */}
-             {/* 
-             <Card title="Live Scratchpad" icon={ScrollText} color="orange" 
-                isOpen={openSections.scratchpad} onToggle={() => toggleSection('scratchpad')}
-                extra={!editingScratch && (
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => setEditingScratch(true)} className="p-2 text-orange-500 hover:bg-orange-500/10 rounded-xl transition-all"><Edit3 size={18}/></button>
-                    <button onClick={() => { if(confirm('Purge?')) api.delete('/memory/scratchpad').then(fetchData) }} className="p-2 text-orange-300 hover:text-red-500 transition-all"><Trash2 size={18}/></button>
-                  </div>
-                )}>
-                <div className="mt-2">
-                   {editingScratch ? (
-                      <div className="space-y-4 animate-scale-in">
-                         <textarea value={scratchDraft} onChange={e => setScratchDraft(e.target.value)}
-                           rows={8}
-                           className="w-full bg-orange-500/5 border border-orange-500/20 rounded-2xl p-6 text-xs font-mono text-light-800 dark:text-orange-100/70 focus:border-orange-500 outline-none transition-all shadow-inner leading-relaxed" />
-                         <div className="flex justify-end gap-4">
-                            <button onClick={() => setEditingScratch(false)} className="text-[10px] font-black text-light-400 hover:text-light-900 uppercase tracking-widest">DISCARD</button>
-                            <button onClick={saveScratchpad} disabled={savingScratch} className="bg-orange-600 text-white text-[10px] font-black px-6 py-2.5 rounded-xl hover:bg-orange-500 transition-all shadow-lg shadow-orange-600/20">
-                               {savingScratch ? 'SAVING...' : 'SYNC NOTES'}
-                            </button>
-                         </div>
-                      </div>
-                   ) : (
-                      <div className="bg-orange-500/5 border border-orange-500/10 rounded-2xl p-6 font-mono text-xs text-light-700 dark:text-orange-200/60 max-h-[220px] overflow-y-auto leading-loose italic relative group">
-                         <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-100 transition-opacity"><Zap size={24} className="text-orange-500" /></div>
-                         {b.scratchpad?.content || 'Scratchpad is currently idle.'}
-                      </div>
-                   )}
-                </div>
-             </Card>
-             */}
 
-             <Card title="Hardware Insights" icon={Cpu} color="primary" isOpen={openSections.preferences} onToggle={() => toggleSection('preferences')}>
-                <div className="space-y-4 mt-2">
-                   <div className="grid grid-cols-1 gap-4">
-                      <div className="flex items-center justify-between p-4 bg-primary-500/5 border border-primary-500/10 rounded-2xl">
-                         <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-primary-500/10 rounded-xl flex items-center justify-center text-primary-500"><Activity size={18}/></div>
-                            <div>
-                               <p className="text-[11px] font-black text-light-900 dark:text-white tracking-widest uppercase">Memory Utilization</p>
-                               <p className="text-[10px] text-light-400 dark:text-slate-500 font-bold">Real-time neural load</p>
-                            </div>
-                         </div>
-                         <p className="text-lg font-black text-primary-500 tracking-tighter">84%</p>
-                      </div>
-                      <div className="flex items-center justify-between p-4 bg-primary-500/5 border border-primary-500/10 rounded-2xl">
-                         <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-primary-500/10 rounded-xl flex items-center justify-center text-primary-500"><Zap size={18}/></div>
-                            <div>
-                               <p className="text-[11px] font-black text-light-900 dark:text-white tracking-widest uppercase">Inference Speed</p>
-                               <p className="text-[10px] text-light-400 dark:text-slate-500 font-bold">Latency metrics</p>
-                            </div>
-                         </div>
-                         <p className="text-lg font-black text-primary-500 tracking-tighter">12ms</p>
-                      </div>
-                   </div>
-                </div>
-             </Card>
-          </div>
         </div>
 
-        {/* Right Column: Global Data Structures */}
-        <div className="xl:col-span-4 space-y-8 lg:space-y-10">
+        {/* Global Data Structures */}
+        <div className="xl:col-span-12 space-y-8 lg:space-y-10">
           
           {/* Neural Domains */}
           <Card 
@@ -513,27 +478,65 @@ export default function Brain() {
             isOpen={openSections.knowledge}
             onToggle={() => toggleSection('knowledge')}
           >
-             <div className="grid grid-cols-1 gap-4 mt-2">
-                {b.knowledge?.topics?.map((t, i) => (
-                  <div key={t.topic} className="group relative bg-[#F8FAFC] dark:bg-dark-950/40 border border-light-200 dark:border-slate-800/60 p-5 rounded-[1.5rem] hover:border-blue-500/50 transition-all duration-300 flex items-center justify-between overflow-hidden shadow-sm">
-                    <div className="flex items-center gap-4 relative z-10">
-                      <div onClick={() => setViewingKnowledgeTopic(t.topic)} className="w-12 h-12 bg-blue-500/10 rounded-xl flex items-center justify-center text-blue-600 dark:text-blue-400 cursor-pointer hover:bg-blue-600 hover:text-white transition-all shadow-inner">
-                        <Book size={20} />
-                      </div>
-                      <div className="cursor-pointer" onClick={() => setViewingKnowledgeTopic(t.topic)}>
-                        <p className="text-base font-black text-light-900 dark:text-white capitalize tracking-tight">{t.topic}</p>
-                        <div className="flex items-center gap-2 mt-0.5">
-                           <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-                           <p className="text-[10px] font-bold text-light-400 dark:text-slate-500 uppercase tracking-widest">{t.count} Chunks</p>
+            <div className="mt-4 overflow-hidden border border-light-200 dark:border-slate-800/60 rounded-2xl bg-white dark:bg-dark-950/20">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-light-50/50 dark:bg-white/[0.02] border-b border-light-200 dark:border-slate-800/60">
+                    <th className="px-6 py-4 text-[10px] font-black text-light-400 dark:text-slate-500 uppercase tracking-widest">Miền tri thức</th>
+                    <th className="px-6 py-4 text-[10px] font-black text-light-400 dark:text-slate-500 uppercase tracking-widest text-center">Dữ liệu (Chunks)</th>
+                    <th className="px-6 py-4 text-[10px] font-black text-light-400 dark:text-slate-500 uppercase tracking-widest text-center">Trạng thái</th>
+                    <th className="px-6 py-4 text-[10px] font-black text-light-400 dark:text-slate-500 uppercase tracking-widest text-right">Hành động</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-light-100 dark:divide-slate-800/40">
+                  {b.knowledge?.topics?.map((t, i) => (
+                    <tr key={t.topic} className="group hover:bg-light-50/50 dark:hover:bg-white/[0.01] transition-colors">
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div onClick={() => setViewingKnowledgeTopic(t.topic)} className="w-10 h-10 bg-blue-500/10 rounded-xl flex items-center justify-center text-blue-600 dark:text-blue-400 cursor-pointer hover:bg-blue-600 hover:text-white transition-all shadow-inner">
+                            <Book size={18} />
+                          </div>
+                          <span className="text-sm font-bold text-light-900 dark:text-white capitalize cursor-pointer hover:text-primary-500" onClick={() => setViewingKnowledgeTopic(t.topic)}>
+                            {t.topic}
+                          </span>
                         </div>
-                      </div>
-                    </div>
-                    <button onClick={() => deleteKnowledgeTopic(t.topic)} className="p-2.5 relative z-10 text-light-300 dark:text-slate-700 hover:text-red-500 hover:bg-red-500/5 rounded-xl transition-all">
-                      <Trash2 size={18} />
-                    </button>
-                  </div>
-                ))}
-             </div>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <span className="px-2.5 py-1 rounded-lg bg-blue-500/5 text-blue-600 dark:text-blue-400 text-xs font-bold border border-blue-500/10">
+                          {t.count}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <div className={`w-1.5 h-1.5 rounded-full ${t.count > 0 ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]' : 'bg-light-300 dark:bg-slate-700'}`} />
+                          <span className="text-[10px] font-bold text-light-400 dark:text-slate-500 uppercase tracking-wider">
+                            {t.count > 0 ? 'Active' : 'Empty'}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-right space-x-2">
+                        <button onClick={() => setViewingKnowledgeTopic(t.topic)} className="p-2 text-light-400 hover:text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all">
+                          <Eye size={16} />
+                        </button>
+                        <button onClick={() => deleteKnowledgeTopic(t.topic)} className="p-2 text-light-400 hover:text-red-500 hover:bg-red-500/5 rounded-lg transition-all">
+                          <Trash2 size={16} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {(!b.knowledge?.topics || b.knowledge.topics.length === 0) && (
+                    <tr>
+                      <td colSpan="4" className="px-6 py-12 text-center">
+                        <div className="flex flex-col items-center opacity-30">
+                          <Database size={32} className="mb-2" />
+                          <p className="text-xs font-bold uppercase tracking-widest text-light-400">Không có miền tri thức nào</p>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </Card>
 
           {/* Preferences */}
@@ -543,36 +546,70 @@ export default function Brain() {
             color="primary" 
             isOpen={openSections.preferences}
             onToggle={() => toggleSection('preferences')}
+            className="xl:col-span-12"
           >
-             <div className="space-y-4 mt-2">
-                {Object.entries(b.preferences || {}).filter(([k]) => !k.startsWith('_')).length > 0 ? (
-                  Object.entries(b.preferences || {}).filter(([k]) => !k.startsWith('_')).map(([k, v], i) => (
-                    <div key={k} className="group relative p-5 bg-[#F8FAFC] dark:bg-dark-950/40 border border-light-200 dark:border-slate-800/60 rounded-[1.5rem] hover:border-primary-500/50 transition-all duration-300">
-                        <div className="flex items-center justify-between mb-2">
-                           <span className="text-[10px] font-black text-primary-500 uppercase tracking-[0.2em]">{k}</span>
-                           <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all">
-                              <button onClick={() => setEditingPreference({key: k, value: v})} className="p-1.5 text-primary-400 hover:text-primary-600 transition-colors"><Edit3 size={14}/></button>
-                              <button onClick={() => deletePreference(k)} className="p-1.5 text-red-300 hover:text-red-500 transition-colors"><Trash2 size={14}/></button>
-                           </div>
-                        </div>
+            <div className="mt-4 overflow-hidden border border-light-200 dark:border-slate-800/60 rounded-2xl bg-white dark:bg-dark-950/20">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-light-50/50 dark:bg-white/[0.02] border-b border-light-200 dark:border-slate-800/60">
+                    <th className="px-6 py-4 text-[10px] font-black text-light-400 dark:text-slate-500 uppercase tracking-widest w-1/3">Tên khóa (Key)</th>
+                    <th className="px-6 py-4 text-[10px] font-black text-light-400 dark:text-slate-500 uppercase tracking-widest">Giá trị (Value)</th>
+                    <th className="px-6 py-4 text-[10px] font-black text-light-400 dark:text-slate-500 uppercase tracking-widest text-right">Hành động</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-light-100 dark:divide-slate-800/40">
+                  {Object.entries(b.preferences || {}).filter(([k]) => !k.startsWith('_')).map(([k, v], i) => (
+                    <tr key={k} className="group hover:bg-light-50/50 dark:hover:bg-white/[0.01] transition-colors">
+                      <td className="px-6 py-4">
+                        <span className="text-[11px] font-black text-primary-600 dark:text-primary-400 uppercase tracking-widest bg-primary-500/5 px-2 py-1 rounded-md border border-primary-500/10">
+                          {k}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
                         {editingPreference?.key === k ? (
-                           <div className="flex gap-2 mt-2 animate-slide-in">
-                              <input value={editingPreference.value} onChange={e => setEditingPreference({...editingPreference, value: e.target.value})}
-                                 className="flex-1 bg-white dark:bg-dark-900 border border-primary-500/50 rounded-xl px-4 py-2 text-xs text-light-900 dark:text-white outline-none focus:ring-2 ring-primary-500/10 shadow-inner" />
-                              <button onClick={() => savePreference(editingPreference.key, editingPreference.value)} className="bg-primary-600 text-white p-2 rounded-xl hover:bg-primary-500 shadow-lg shadow-primary-600/20 transition-all"><CheckCircle2 size={16}/></button>
-                              <button onClick={() => setEditingPreference(null)} className="text-light-400 p-2"><X size={16}/></button>
-                           </div>
+                          <div className="flex gap-2 animate-slide-in">
+                            <input value={editingPreference.value} onChange={e => setEditingPreference({...editingPreference, value: e.target.value})}
+                              className="flex-1 bg-white dark:bg-dark-900 border border-primary-500/50 rounded-xl px-4 py-2 text-xs text-light-900 dark:text-white outline-none focus:ring-2 ring-primary-500/10 shadow-inner" />
+                            <button onClick={() => savePreference(editingPreference.key, editingPreference.value)} className="bg-primary-600 text-white p-2 rounded-xl hover:bg-primary-500 shadow-lg shadow-primary-600/20 transition-all">
+                              <CheckCircle2 size={16} />
+                            </button>
+                            <button onClick={() => setEditingPreference(null)} className="text-light-400 p-2 hover:text-light-900 transition-colors">
+                              <X size={16} />
+                            </button>
+                          </div>
                         ) : (
-                           <p className="text-sm font-bold text-light-900 dark:text-slate-200">{v}</p>
+                          <p className="text-sm font-medium text-light-800 dark:text-slate-300">
+                            {v}
+                          </p>
                         )}
-                    </div>
-                  ))
-                ) : (
-                  <div className="p-10 text-center border-2 border-dashed border-light-200 dark:border-slate-800 rounded-[2rem] opacity-30">
-                    <p className="text-xs font-bold uppercase tracking-widest">No neural filters active</p>
-                  </div>
-                )}
-             </div>
+                      </td>
+                      <td className="px-6 py-4 text-right space-x-2">
+                        {!editingPreference && (
+                          <>
+                            <button onClick={() => setEditingPreference({key: k, value: v})} className="p-2 text-light-400 hover:text-primary-500 hover:bg-primary-500/10 rounded-lg transition-all">
+                              <Edit3 size={16} />
+                            </button>
+                            <button onClick={() => deletePreference(k)} className="p-2 text-light-400 hover:text-red-500 hover:bg-red-500/5 rounded-lg transition-all">
+                              <Trash2 size={16} />
+                            </button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                  {Object.entries(b.preferences || {}).filter(([k]) => !k.startsWith('_')).length === 0 && (
+                    <tr>
+                      <td colSpan="3" className="px-6 py-12 text-center text-light-400 dark:text-slate-600 opacity-30">
+                        <div className="flex flex-col items-center">
+                          <User size={32} className="mb-2" />
+                          <p className="text-xs font-bold uppercase tracking-widest">Không có tùy chỉnh nào</p>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </Card>
 
         </div>
@@ -582,5 +619,6 @@ export default function Brain() {
       {showTeach && <TeachModal onClose={() => setShowTeach(false)} onTeach={fetchData} />}
       {viewingKnowledgeTopic && <KnowledgeModal topic={viewingKnowledgeTopic} onClose={() => setViewingKnowledgeTopic(null)} onUpdate={fetchData} />}
     </div>
-  )
+  </div>
+)
 }

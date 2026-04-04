@@ -32,5 +32,6 @@ class ChatMessage(Base):
     session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=False, index=True)
     role = Column(String(20), nullable=False)  # user | assistant | system
     content = Column(Text, nullable=False)
+    attachments = Column(Text, nullable=True) # JSON list of objects: [{name, url, type}]
     token_count = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.datetime.now(datetime.UTC))

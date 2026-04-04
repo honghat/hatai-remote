@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import api from '../api'
 
 const AuthContext = createContext(null)
@@ -33,10 +33,45 @@ export function AuthProvider({ children }) {
     setUser(null)
   }
 
-  const isAdmin = () => user?.role_id === 1
+  const isAdmin = () => user?.role?.name === 'admin' || user?.role_id === 1
+
+  /**
+   * Kiểm tra user có quyền cụ thể không.
+   * Admin luôn có full quyền.
+   * @param {string} resource - Module: "users", "erp", "accounting", "chat", ...
+   * @param {string} action - "read", "write", "manage", "execute", "approve"
+   */
+  const hasPermission = useCallback((resource, action) => {
+    if (!user) return false
+    if (!user.permissions) return false
+    return user.permissions.some(
+      p => p.resource === resource && (p.action === action || p.action === 'manage')
+    )
+  }, [user])
+
+  /**
+   * Kiểm tra user có ít nhất 1 trong các quyền.
+   * @param {Array<[string, string]>} perms - Mảng [resource, action]
+   */
+  const hasAnyPermission = useCallback((...perms) => {
+    if (!user) return false
+    if (user.role?.name === 'admin') return true
+    return perms.some(([resource, action]) => hasPermission(resource, action))
+  }, [user, hasPermission])
+
+  // Refresh user data on mount if token exists
+  useEffect(() => {
+    const token = localStorage.getItem('hatai_token')
+    if (token && user) {
+      api.get('/auth/me').then(({ data }) => {
+        localStorage.setItem('hatai_user', JSON.stringify(data))
+        setUser(data)
+      }).catch(() => {})
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, loading, isAdmin }}>
+    <AuthContext.Provider value={{ user, login, logout, loading, isAdmin, hasPermission, hasAnyPermission }}>
       {children}
     </AuthContext.Provider>
   )
