@@ -82,9 +82,6 @@ export default function ActivityLogs() {
             </div>
             <div>
               <h1 className="text-xl font-extrabold text-light-900 dark:text-white tracking-tight">Lịch sử hoạt động</h1>
-              <p className="text-xs text-light-400 dark:text-slate-500 mt-0.5 font-bold uppercase tracking-widest">
-                Audit Logs & System actions tracking
-              </p>
             </div>
           </div>
           <div className="flex items-center gap-2">

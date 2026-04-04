@@ -1106,7 +1106,6 @@ export default function Project() {
             {/* Activity Bar - DESKTOP ONLY */}
             <div className={`hidden md:flex w-14 flex-col items-center py-6 border-r transition-colors z-50 ${isDark ? 'bg-[#0a0a0c] border-white/5' : 'bg-white border-black/[0.05]'}`}>
                 <div onClick={() => { setActiveSidebarView('explorer'); setMobileExplorerOpen(true); }} className={`p-3 cursor-pointer rounded-xl mb-4 transition-all ${activeSidebarView === 'explorer' ? 'bg-primary-600 text-white shadow-lg shadow-primary-900/30' : 'text-slate-500 hover:bg-slate-500/10'}`} title="Explorer"><FileCode size={20} /></div>
-                <div onClick={() => { setActiveSidebarView('history'); setMobileExplorerOpen(true); }} className={`p-3 cursor-pointer rounded-xl mb-4 transition-all ${activeSidebarView === 'history' ? 'bg-primary-600 text-white shadow-lg shadow-primary-900/30' : 'text-slate-500 hover:bg-slate-500/10'}`} title="Collaboration History"><History size={20} /></div>
                 <div onClick={() => { setActiveSidebarView('git'); setMobileExplorerOpen(true); }} className={`p-3 cursor-pointer rounded-xl transition-all ${activeSidebarView === 'git' ? 'bg-primary-600 text-white shadow-lg shadow-primary-900/30' : 'text-slate-500 hover:bg-slate-500/10'}`} title="Source Control"><GitBranch size={20} /></div>
             </div>
     
@@ -1138,27 +1137,46 @@ export default function Project() {
                             </div>
                         </div>
                         <div className="flex-1 overflow-auto py-2 px-5 space-y-3 custom-scrollbar">
-                            {sessions.map(s => (
-                                <div key={s.id} onClick={() => { handleLoadSession(s.id); setMobileExplorerOpen(false); }} className={`relative p-5 rounded-3xl border cursor-pointer transition-all duration-500 group/session overflow-hidden ${activeSessionId == s.id ? (isDark ? 'bg-primary-500/[0.08] border-primary-500/30 shadow-2xl shadow-primary-900/20' : 'bg-primary-500/5 border-primary-500/20 shadow-xl shadow-primary-500/10') : (isDark ? 'bg-white/[0.02] border-white/5 hover:bg-white/[0.05] hover:border-white/10' : 'bg-white/40 border-black/[0.03] hover:bg-white hover:border-black/5')}`}>
-                                    {activeSessionId == s.id && <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-primary-500 rounded-r-full shadow-[0_0_15px_rgba(99,102,241,0.8)]" />}
-                                    <div className="flex flex-col gap-3">
-                                        <div className="flex items-center justify-between">
-                                            <p className={`text-[13px] font-black leading-tight truncate group-hover/session:text-primary-500 transition-colors flex-1 ${activeSessionId == s.id ? 'text-primary-500' : (isDark ? 'text-slate-300' : 'text-slate-900')}`}>{s.title || 'Collaborative Node'}</p>
-                                            <button onClick={(e) => handleDeleteSession(e, s.id)} className="opacity-0 group-hover/session:opacity-100 p-2 text-red-500/50 hover:text-red-500 transition-all hover:scale-110"><Trash2 size={12} /></button>
-                                        </div>
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-2 opacity-30 text-[9px] font-bold uppercase tracking-widest group-hover/session:opacity-60 transition-opacity">
-                                                <MessageSquare size={12} /> {s.message_count || 0} Events
-                                            </div>
-                                            <span className="text-[9px] font-black uppercase tracking-[0.1em] opacity-20 group-hover/session:opacity-40 transition-opacity">{timeAgo(s.created_at)}</span>
-                                        </div>
+                        {sessions.map(s => (
+                            <div key={s.id} onClick={() => { handleLoadSession(s.id); setMobileExplorerOpen(false); }} className={`relative p-5 rounded-3xl border cursor-pointer transition-all duration-500 group/session overflow-hidden ${activeSessionId == s.id ? (isDark ? 'bg-primary-500/[0.08] border-primary-500/30 shadow-2xl shadow-primary-900/20' : 'bg-primary-500/5 border-primary-500/20 shadow-xl shadow-primary-500/10') : (isDark ? 'bg-white/[0.02] border-white/5 hover:bg-white/[0.05] hover:border-white/10' : 'bg-white/40 border-black/[0.03] hover:bg-white hover:border-black/5')}`}>
+                                {activeSessionId == s.id && <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-primary-500 rounded-r-full shadow-[0_0_15px_rgba(99,102,241,0.8)]" />}
+                                <div className="flex flex-col gap-3">
+                                    <div className="flex items-center justify-between">
+                                        <p className={`text-[13px] font-black leading-tight truncate group-hover/session:text-primary-500 transition-colors flex-1 ${activeSessionId == s.id ? 'text-primary-500' : (isDark ? 'text-slate-300' : 'text-slate-900')}`}>{s.title || 'Collaborative Node'}</p>
+                                        <button onClick={(e) => handleDeleteSession(e, s.id)} className="opacity-0 group-hover/session:opacity-100 p-2 text-red-500/50 hover:text-red-500 transition-all hover:scale-110"><Trash2 size={12} /></button>
                                     </div>
-                                    <div className={`absolute -inset-[1px] rounded-3xl bg-gradient-to-br from-primary-500/5 to-transparent opacity-0 group-hover/session:opacity-100 transition-opacity pointer-events-none`} />
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2 opacity-30 text-[9px] font-bold uppercase tracking-widest group-hover/session:opacity-60 transition-opacity">
+                                            <MessageSquare size={12} /> {s.message_count || 0} Events
+                                        </div>
+                                        <span className="text-[9px] font-black uppercase tracking-[0.1em] opacity-20 group-hover/session:opacity-40 transition-opacity">{timeAgo(s.created_at)}</span>
+                                    </div>
                                 </div>
-                            ))}
-                        </div>
-                    </>
-                ) : (
+                                <div className={`absolute -inset-[1px] rounded-3xl bg-gradient-to-br from-primary-500/5 to-transparent opacity-0 group-hover/session:opacity-100 transition-opacity pointer-events-none`} />
+                            </div>
+                        ))}
+                    </div>
+                </>
+            ) : activeSidebarView === 'logs' ? (
+                <>
+                    <div className="p-6 pb-2 flex items-center justify-between">
+                        <span className="text-[10px] font-black uppercase tracking-[0.3em] opacity-30">Phòng điều khiển</span>
+                        <button onClick={fetchLogs} className="opacity-30 hover:opacity-100"><RotateCcw size={14}/></button>
+                    </div>
+                    <div className="flex-1 overflow-auto p-5 space-y-2 font-mono text-[10px] custom-scrollbar bg-black/10">
+                        {systemLogs.length === 0 ? (
+                            <div className="text-center py-10 opacity-20 uppercase tracking-widest font-black">No Logs Available</div>
+                        ) : (
+                            systemLogs.map((log, i) => (
+                                <div key={i} className="flex gap-2 p-2 rounded bg-white/5 border border-white/5 truncate hover:whitespace-normal group transition-all">
+                                    <span className="text-primary-500 shrink-0 opacity-40">[{i}]</span>
+                                    <span className={log.includes('[ERROR]') ? 'text-red-400' : (log.includes('[Code]') ? 'text-amber-400' : 'text-slate-400')}>{log}</span>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </>
+            ) : (
                     <>
                         <div className="p-6 pb-2 flex items-center justify-between">
                             <span className="text-[10px] font-black uppercase tracking-[0.3em] opacity-30">Source Control</span>
@@ -1376,6 +1394,22 @@ export default function Project() {
                                         padding={0} 
                                         style={{ fontFamily: '"Fira Code", "Fira Mono", monospace', fontSize: 13, minHeight: '100%', outline: 'none', caretColor: isDark ? '#fff' : '#000', color: isDark ? (proposingContents[activeTab] ? '#00ff99' : '#e2e8f0') : (proposingContents[activeTab] ? '#006644' : '#2d2d2d'), lineHeight: '1.9em', transition: 'color 0.3s ease' }} 
                                     />
+
+                                    {/* PROMINENT ABSOLUTE SAVE BUTTON - REPOSITIONED TO AVOID CHAT OVERLAP */}
+                                    {pendingChanges[activeTab] && !saving[activeTab] && (
+                                        <button 
+                                            onClick={() => handleSaveFile(activeTab)}
+                                            className="absolute bottom-10 right-10 z-[120] flex items-center gap-3 px-8 py-4 bg-primary-600 hover:bg-primary-500 text-white rounded-2xl font-black uppercase tracking-widest shadow-[0_20px_50px_rgba(79,70,229,0.3)] hover:shadow-[0_25px_60px_rgba(79,70,229,0.5)] hover:-translate-y-1 transition-all animate-bounce-slow group"
+                                        >
+                                            <div className="relative">
+                                                <Save size={20} />
+                                                <div className="absolute -inset-2 bg-white/20 rounded-full animate-ping" />
+                                            </div>
+                                            Lưu code (Save & Push)
+                                            <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:animate-shimmer" />
+                                        </button>
+                                    )}
+
                                     {proposingContents[activeTab] && !isChatStreaming && (
                                         <div className="mt-12 flex gap-4 animate-in fade-in slide-in-from-top-2 duration-500 pb-10">
                                             <button onClick={() => { setEditingContents(prev => ({ ...prev, [activeTab]: proposingContents[activeTab] })); setProposingContents(prev => ({ ...prev, [activeTab]: null })); setPendingChanges(prev => ({ ...prev, [activeTab]: true })); }} className="px-6 py-2.5 bg-primary-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-primary-500 shadow-xl shadow-primary-900/40">Accept Reconstruction</button>
@@ -1395,18 +1429,25 @@ export default function Project() {
                         <span className="text-[12px] font-black uppercase tracking-[2em] opacity-10">Core Stable</span>
                     </div>
                 )}
-                {/* TELEMETRY FEED - REFINED */}
-                <div className={`transition-all duration-500 ease-in-out border-t overflow-hidden flex flex-col ${showDiagnostics ? 'h-48' : 'h-10'} ${isDark ? 'bg-[#08080a] border-white/5' : 'bg-[#f5f2e8] border-black/5'}`}>
-                    <div onClick={() => setShowDiagnostics(!showDiagnostics)} className="flex items-center justify-between px-6 py-2 cursor-pointer hover:bg-white/5 transition-colors shrink-0">
-                        <div className="flex items-center gap-3 font-black uppercase tracking-[0.4em] opacity-40 text-primary-500 text-[10px]">
-                             <Activity size={12} className={showDiagnostics ? "animate-pulse" : ""} /> 
-                             Pulse Diagnostics
+                {/* BÍCH LẠC ENGINE LOGS - IMPROVED VISIBILITY */}
+                <div className={`transition-all duration-500 ease-in-out border-t overflow-hidden flex flex-col ${showDiagnostics ? 'h-64' : 'h-12'} ${isDark ? 'bg-[#08080a] border-white/5' : 'bg-[#f5f2e8] border-black/5'}`}>
+                    <div onClick={() => setShowDiagnostics(!showDiagnostics)} className="flex items-center justify-between px-6 py-3 cursor-pointer hover:bg-white/5 transition-colors shrink-0">
+                        <div className="flex items-center gap-3 font-black uppercase tracking-[0.4em] text-primary-500 text-[10px]">
+                             <div className="relative">
+                               <Activity size={12} className={showDiagnostics ? "animate-pulse" : ""} /> 
+                               <div className="absolute inset-0 bg-primary-500 blur-sm opacity-20" />
+                             </div>
+                             Bích Lạc Engine Logs
                         </div>
                         <div className="flex items-center gap-4">
                             {!showDiagnostics && systemLogs.length > 0 && (
-                                <span className="text-[9px] font-mono opacity-40 truncate max-w-[200px] hidden md:block">{systemLogs[systemLogs.length-1]}</span>
+                                <span className="text-[9px] font-mono text-primary-500/60 truncate max-w-[300px] hidden md:block">
+                                  {systemLogs[systemLogs.length-1]}
+                                </span>
                             )}
-                            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-green-500/10 text-green-500 border border-green-500/20 text-[8px] font-bold tracking-widest animate-pulse">LIVE_NODE</div>
+                            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/20 text-[8px] font-bold tracking-widest animate-pulse">
+                              AGENT_ACTIVE
+                            </div>
                             <ChevronDown size={14} className={`transition-transform duration-300 opacity-40 ${showDiagnostics ? '' : 'rotate-180'}`} />
                         </div>
                     </div>
@@ -1424,44 +1465,24 @@ export default function Project() {
             </div>
         </div>
 
-        {/* Chat Sidebar - Responsive Drawer */}
-        {showChat && (
-            <div 
-                className="fixed inset-0 bg-black/60 z-[80] md:hidden animate-fade-in backdrop-blur-sm"
-                onClick={() => setShowChat(false)}
-            />
-        )}
-        
-        <div className={`w-[280px] md:w-[460px] border-l flex flex-col z-[90] transition-all duration-300 h-full overflow-x-hidden
-            ${showChat ? 'translate-x-0 fixed right-0' : 'translate-x-full fixed right-[-460px] md:relative md:right-0'} 
-            ${isDark ? 'bg-[#0a0a0c] border-white/5 shadow-2xl shadow-black/80' : 'bg-[#f5f2eb] border-black/[0.05]'}`}>
+        {/* Chat Sidebar - Permanent & Narrower */}
+        <div className={`w-[350px] border-l flex flex-col z-[90] transition-all duration-300 h-full overflow-x-hidden ${isDark ? 'bg-[#0a0a0c] border-white/5 shadow-2xl shadow-black/80' : 'bg-[#f5f2eb] border-black/[0.05]'}`}>
             
-            {!showChat && (
-                <button onClick={() => setShowChat(true)} className={`hidden md:flex absolute left-[-40px] top-1/2 -translate-y-1/2 w-10 h-20 border rounded-l-2xl items-center justify-center shadow-2xl hover:scale-105 transition-all ${isDark ? 'bg-[#111114] border-white/10 text-primary-400' : 'bg-[#f5f2eb] border-black/5'}`}>
-                    <Sparkles size={24} />
-                </button>
-            )}
             <div className={`p-6 md:p-8 flex items-center justify-between`}>
-                <div className="flex items-center gap-3 md:gap-4 min-w-0">
-                    <div className="flex-shrink-0 w-8 h-8 md:w-10 md:h-10 bg-primary-600 rounded-xl md:rounded-2xl flex items-center justify-center text-white shadow-2xl shadow-primary-600/30">
-                        <Zap size={16} />
-                    </div>
-                    <h2 className="text-[12px] md:text-[14px] font-black uppercase tracking-[0.2em] md:tracking-[0.4em] truncate">HatAI Code</h2>
-                </div>
                 <div className="flex items-center gap-2">
+                    <button 
+                        onClick={() => { setActiveSidebarView('history'); if(window.innerWidth < 768) setMobileExplorerOpen(true); }}
+                        title="Xem lịch sử chat"
+                        className={`p-2 rounded-xl transition-all flex items-center gap-1.5 border ${isDark ? 'hover:bg-white/5 border-white/5 text-slate-400 hover:text-white' : 'hover:bg-white border-black/5 text-slate-500 hover:text-slate-900'}`}
+                    >
+                        <History size={18} />
+                    </button>
                     <button 
                         onClick={handleNewChat}
                         title="Tạo đoạn chat mới"
-                        className={`p-2 rounded-xl transition-all flex items-center gap-2 border ${isDark ? 'hover:bg-primary-500/10 border-white/5 text-primary-400 hover:text-primary-300' : 'hover:bg-primary-50 border-black/5 text-primary-600'}`}
+                        className={`p-2 rounded-xl transition-all flex items-center gap-1.5 border ${isDark ? 'hover:bg-primary-500/10 border-white/5 text-primary-400 hover:text-primary-300' : 'hover:bg-primary-50 border-black/5 text-primary-600'}`}
                     >
                         <Plus size={18} />
-                        <span className="text-[10px] font-black uppercase tracking-widest hidden md:inline">New Chat</span>
-                    </button>
-                    <button 
-                        onClick={() => setShowChat(false)} 
-                        className={`p-2 rounded-xl transition-all ${isDark ? 'hover:bg-white/5 text-slate-500 hover:text-white' : 'hover:bg-black/5 text-slate-300 hover:text-black'}`}
-                    >
-                        <X size={18} />
                     </button>
                 </div>
             </div>

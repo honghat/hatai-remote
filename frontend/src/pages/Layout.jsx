@@ -39,10 +39,10 @@ const NAV_SECTIONS = [
   },
   {
     key: 'knowledge',
-    label: 'Trí nhớ Agent',
+    label: 'Cài đặt Agent',
     icon: Brain,
     items: [
-      { path: '/brain', label: 'Tổng quan', icon: Brain, permission: ['brain', 'read'] },
+      { path: '/brain', label: 'Cài đặt Agent', icon: Brain, permission: ['brain', 'read'] },
     ],
   },
   {
@@ -65,6 +65,7 @@ const NAV_SECTIONS = [
       { path: '/admin/roles', label: 'Vai trò & Quyền', icon: KeyRound },
       { path: '/admin/activities', label: 'Lịch sử hoạt động', icon: Activity },
       { path: '/admin/settings', label: 'Cấu hình', icon: Settings },
+      { path: '/about', label: 'Tài liệu Dự án', icon: FileText },
     ],
   },
 ]
@@ -93,7 +94,7 @@ function RoleBadge({ user, isCollapsed }) {
   }
 
   return (
-    <div className="mx-3 p-3 rounded-xl bg-light-50/80 dark:bg-dark-800/50 border border-light-100 dark:border-slate-800/40 relative group">
+    <div className="mx-3 p-3 rounded-xl bg-light-100 dark:bg-dark-800/50 border border-light-200 dark:border-slate-800/40 relative group">
       <div className="flex items-center gap-2.5">
         <div className={`flex-shrink-0 w-9 h-9 rounded-lg bg-gradient-to-br ${gradient} flex items-center justify-center shadow-lg transition-transform group-hover:scale-105 duration-300 overflow-hidden`}>
           {user?.avatar_url ? (
@@ -191,7 +192,7 @@ function NavSection({ section, isCollapsed, location, hasPermission, isAdmin, de
         className={`flex items-center gap-2 w-full px-3 py-2 rounded-lg text-[11px] font-extrabold uppercase tracking-widest transition-colors
           ${isAnyActive
             ? 'text-primary-600 dark:text-primary-400'
-            : 'text-light-300 dark:text-slate-600 hover:text-light-500 dark:hover:text-slate-400'
+            : 'text-light-500 dark:text-slate-600 hover:text-light-700 dark:hover:text-slate-400'
           }`}
       >
         <section.icon size={13} className="flex-shrink-0 opacity-60" />
@@ -287,20 +288,25 @@ export default function Layout() {
           ${sidebarOpen ? 'w-[260px]' : 'w-[72px]'} 
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}
       >
-        {/* Logo Header */}
-        <div className="flex items-center gap-3 px-4 py-4 border-b border-light-200 dark:border-slate-800/60 bg-light-50/30 dark:bg-transparent">
-          <div className="flex-shrink-0 w-9 h-9 bg-primary-600 dark:bg-primary-600/20 border border-primary-500/20 dark:border-primary-500/30 rounded-xl flex items-center justify-center shadow-lg shadow-primary-600/10 dark:shadow-none mx-auto relative">
-            <Bot size={20} className="text-white dark:text-primary-400" />
-            {/* Status dot for icon mode */}
+        {/* Logo Header - CLICK LOGO TO TOGGLE SIDEBAR */}
+        <div className="flex items-center gap-3 px-4 py-4 border-b border-light-200 dark:border-slate-800/60 bg-light-100/50 dark:bg-transparent">
+          <button 
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="flex-shrink-0 w-10 h-10 bg-primary-600 dark:bg-primary-600/20 border border-primary-500/20 dark:border-primary-500/30 rounded-xl flex items-center justify-center shadow-lg shadow-primary-600/20 dark:shadow-none hover:scale-110 active:scale-95 transition-all relative group"
+            title={sidebarOpen ? "Thu nhỏ thanh bên" : "Mở rộng thanh bên"}
+          >
+            <Bot size={22} className="text-white dark:text-primary-400 group-hover:animate-pulse" />
+            {/* Status dot in standalone mode */}
             {!sidebarOpen && (
               <div className="absolute -top-0.5 -right-0.5">
-                <span className="flex h-2 w-2 relative">
+                <span className="flex h-2.5 w-2.5 relative">
                   <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${aiReady ? 'bg-emerald-400' : 'bg-red-400'}`}></span>
-                  <span className={`relative inline-flex rounded-full h-2 w-2 border border-white dark:border-dark-900 ${aiReady ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
+                  <span className={`relative inline-flex rounded-full h-2.5 w-2.5 border border-white dark:border-dark-900 ${aiReady ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
                 </span>
               </div>
             )}
-          </div>
+            <div className="absolute inset-0 rounded-xl bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity" />
+          </button>
           {sidebarOpen && (
             <div className="min-w-0 animate-fade-in flex-1">
               <div className="flex items-center gap-1.5 min-w-0">
@@ -310,13 +316,6 @@ export default function Layout() {
               <p className="text-[10px] font-bold text-primary-600 dark:text-primary-500 mt-1 uppercase tracking-widest truncate">All In One</p>
             </div>
           )}
-          <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="ml-auto p-1.5 text-light-400 dark:text-slate-500 hover:text-light-900 dark:hover:text-white hover:bg-light-100 dark:hover:bg-dark-800 rounded-lg transition-all flex-shrink-0"
-            id="sidebar-toggle"
-          >
-            {sidebarOpen ? <X size={16} /> : <Menu size={16} />}
-          </button>
         </div>
 
         {/* Profile Sidebar Section - Integrated with Theme/Logout */}
@@ -375,6 +374,18 @@ export default function Layout() {
 
       {/* Main Content */}
       <main className="flex-1 overflow-hidden flex flex-col relative transition-all duration-300 pt-[57px] md:pt-0">
+        {/* Desktop Sidebar Toggle (Only visible when sidebar is collapsed or hidden) */}
+        {!sidebarOpen && (
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="hidden md:flex fixed top-4 left-4 z-[30] p-2 bg-primary-600 dark:bg-primary-600/20 border border-primary-500/20 dark:border-primary-500/30 rounded-xl text-white dark:text-primary-400 shadow-xl shadow-primary-600/20 hover:scale-110 active:scale-95 transition-all animate-fade-in group"
+            title="Mở rộng thanh bên"
+          >
+            <Bot size={20} className="group-hover:animate-pulse" />
+            <div className="absolute inset-0 rounded-xl bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity" />
+          </button>
+        )}
+
         {/* Mobile Header */}
         <div className="flex md:hidden items-center gap-3 px-4 h-[57px] bg-white/76 dark:bg-dark-900/76 border-b border-light-200 dark:border-slate-800/60 backdrop-blur-md fixed top-0 left-0 right-0 z-50">
           <button

@@ -229,10 +229,10 @@ export default function AdminSettings() {
                 <table className="w-full text-left border-collapse">
                    <thead>
                       <tr className="bg-light-50/50 dark:bg-dark-950/40 border-b border-light-200 dark:border-slate-800/60">
-                         <th className="px-8 py-5 text-[10px] font-black text-light-500 dark:text-slate-500 uppercase tracking-[0.25em]">Name / Type</th>
-                         <th className="px-8 py-5 text-[10px] font-black text-light-500 dark:text-slate-500 uppercase tracking-[0.25em]">Intelligence Model</th>
-                         <th className="px-8 py-5 text-[10px] font-black text-light-500 dark:text-slate-500 uppercase tracking-[0.25em]">Sync Status</th>
-                         <th className="px-8 py-5 text-[10px] font-black text-light-500 dark:text-slate-500 uppercase tracking-[0.25em] text-right pr-12">Control Actions</th>
+                         <th className="px-8 py-5 text-[10px] font-black text-light-500 dark:text-slate-500 uppercase tracking-[0.25em]">Tên / Loại</th>
+                         <th className="px-8 py-5 text-[10px] font-black text-light-500 dark:text-slate-500 uppercase tracking-[0.25em]">Mô hình trí tuệ</th>
+                         <th className="px-8 py-5 text-[10px] font-black text-light-500 dark:text-slate-500 uppercase tracking-[0.25em]">Trạng thái đồng bộ</th>
+                         <th className="px-8 py-5 text-[10px] font-black text-light-500 dark:text-slate-500 uppercase tracking-[0.25em] text-right pr-12">Thao tác điều khiển</th>
                       </tr>
                    </thead>
                    <tbody className="divide-y divide-light-200 dark:divide-slate-800/40">
@@ -265,7 +265,7 @@ export default function AdminSettings() {
                             <div className="flex items-center gap-2">
                                <div className={`w-1.5 h-1.5 rounded-full ${p.is_active ? 'bg-emerald-500 animate-pulse' : 'bg-light-300 dark:bg-slate-700'}`} />
                                <span className={`text-[10px] font-black uppercase tracking-widest ${p.is_active ? 'text-emerald-500' : 'text-light-400 dark:text-slate-600'}`}>
-                                  {p.is_active ? 'Deployed' : 'Standby'}
+                                  {p.is_active ? 'Đã triển khai' : 'Chờ lệnh'}
                                </span>
                             </div>
                           </td>
@@ -274,7 +274,7 @@ export default function AdminSettings() {
                                 {!p.is_active && (
                                    <button onClick={() => handleActivate(p.id)} disabled={activating === p.id}
                                       className="px-4 py-2 bg-primary-600/10 text-primary-600 hover:bg-primary-600 hover:text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all">
-                                      {activating === p.id ? 'Deploying...' : 'Deploy Link'}
+                                      {activating === p.id ? 'Đang triển khai...' : 'Kích hoạt kết nối'}
                                    </button>
                                 )}
                                 <button onClick={() => handleOpenEdit(p)} className="p-2.5 text-light-400 dark:text-slate-500 hover:bg-light-100 dark:hover:bg-dark-800 rounded-xl transition-all">
@@ -290,7 +290,7 @@ export default function AdminSettings() {
                       {providers.length === 0 && (
                         <tr>
                           <td colSpan="4" className="px-8 py-16 text-center text-light-400 dark:text-slate-600 text-xs font-black uppercase tracking-widest opacity-40 italic">
-                             No AI providers configured in workspace.
+                             Không có nhà cung cấp AI nào được cấu hình trong workspace.
                           </td>
                         </tr>
                       )}
@@ -301,19 +301,19 @@ export default function AdminSettings() {
 
           {/* Infrastructure Cards */}
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-              <SettingsCard icon={Server} title="Core Server" color="from-emerald-600 to-teal-700">
-                <InfoRow label="Signal Status" value={health?.status === 'ok' ? 'Operational' : 'Critical'} status={health?.status === 'ok' ? 'ok' : 'warn'} />
-                <InfoRow label="System Version" value={health?.version || '1.0.0 Stable'} />
+              <SettingsCard icon={Server} title="Máy chủ cốt lõi" color="from-emerald-600 to-teal-700">
+                <InfoRow label="Trạng thái tín hiệu" value={health?.status === 'ok' ? 'Đang hoạt động' : 'Nguy cấp'} status={health?.status === 'ok' ? 'ok' : 'warn'} />
+                <InfoRow label="Phiên bản hệ thống" value={health?.version || '1.0.0 Stable'} />
               </SettingsCard>
 
-              <SettingsCard icon={Database} title="Intelligence Infra" color="from-primary-600 to-indigo-700">
-                <InfoRow label="Active Neural Source" value={status?.provider?.toUpperCase() || '—'} />
-                <InfoRow label="Long-term Memory" value="ChromaDB Active" status="ok" />
+              <SettingsCard icon={Database} title="Hạ tầng trí tuệ" color="from-primary-600 to-indigo-700">
+                <InfoRow label="Nguồn Neural hoạt động" value={status?.provider?.toUpperCase() || '—'} />
+                <InfoRow label="Bộ nhớ dài hạn" value="ChromaDB Sẵn sàng" status="ok" />
               </SettingsCard>
 
               <SettingsCard icon={Shield} title="Neural Guard" color="from-rose-600 to-red-800">
-                <InfoRow label="Encryption Layer" value="AES-256" status="ok" />
-                <InfoRow label="Access Protocol" value="RBAC Enabled" />
+                <InfoRow label="Lớp mã hóa" value="AES-256" status="ok" />
+                <InfoRow label="Giao thức truy cập" value="RBAC Kích hoạt" />
               </SettingsCard>
 
               <SettingsCard icon={Info} title="Module Insights" color="from-blue-600 to-cyan-800">
@@ -332,10 +332,10 @@ export default function AdminSettings() {
               <div className="px-8 py-6 border-b border-light-100 dark:border-slate-800/60 bg-light-50/50 dark:bg-dark-950/40 flex items-center justify-between">
                 <div>
                   <h4 className="text-lg font-black text-light-900 dark:text-white tracking-tight">
-                    {editingProvider ? 'Update Model Connection' : 'Register New AI Module'}
+                    {editingProvider ? 'Cập nhật kết nối mô hình' : 'Đăng ký Module AI mới'}
                   </h4>
                   <p className="text-[10px] text-light-400 dark:text-slate-500 font-bold uppercase tracking-widest mt-1 opacity-70">
-                    Configuration Protocol v1.4
+                    Giao thức cấu hình v1.4
                   </p>
                 </div>
                 <button type="button" onClick={() => setIsModalOpen(false)} className="p-2 text-light-400 dark:text-slate-500 hover:bg-light-100 dark:hover:bg-dark-800 rounded-xl transition-all"><X size={20} /></button>
@@ -343,25 +343,25 @@ export default function AdminSettings() {
 
               <div className="p-8 space-y-5">
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black uppercase tracking-widest text-light-500 dark:text-slate-500 px-1">Display Label</label>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-light-500 dark:text-slate-500 px-1">Nhãn hiển thị</label>
                   <input required type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})}
                     className="w-full bg-light-50 dark:bg-dark-950/50 border border-light-200 dark:border-slate-800/80 rounded-2xl px-5 py-3.5 text-sm font-bold text-light-900 dark:text-white outline-none focus:border-primary-500/50 transition-all"
-                    placeholder="e.g. My DeepSeek Cluster" />
+                    placeholder="vd: Cụm DeepSeek của tôi" />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-light-500 dark:text-slate-500 px-1">Provider Core</label>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-light-500 dark:text-slate-500 px-1">Cốt lõi nhà cung cấp</label>
                     <select value={formData.provider_type} onChange={e => setFormData({...formData, provider_type: e.target.value})}
                       className="w-full bg-light-50 dark:bg-dark-950/50 border border-light-200 dark:border-slate-800/80 rounded-2xl px-5 py-3.5 text-sm font-bold text-light-900 dark:text-white outline-none transition-all">
-                      <option value="openai">OpenAI / Compatible</option>
+                      <option value="openai">OpenAI / Tương thích</option>
                       <option value="gemini">Google Gemini</option>
                       <option value="ollama">Ollama Local</option>
                       <option value="deepseek">DeepSeek Official</option>
                     </select>
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-light-500 dark:text-slate-500 px-1">Internal Model Name</label>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-light-500 dark:text-slate-500 px-1">Tên mô hình nội bộ</label>
                     <input required type="text" value={formData.model_name} onChange={e => setFormData({...formData, model_name: e.target.value})}
                       className="w-full bg-light-50 dark:bg-dark-950/50 border border-light-200 dark:border-slate-800/80 rounded-2xl px-5 py-3.5 text-sm font-bold text-light-900 dark:text-white outline-none transition-all"
                       placeholder="e.g. gpt-4o" />
@@ -376,20 +376,20 @@ export default function AdminSettings() {
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black uppercase tracking-widest text-light-500 dark:text-slate-500 px-1">Access Credential (API Key)</label>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-light-500 dark:text-slate-500 px-1">Chứng chỉ truy cập (API Key)</label>
                   <div className="relative">
                     <input type="password" value={formData.api_key} onChange={e => setFormData({...formData, api_key: e.target.value})}
                       className="w-full bg-light-50 dark:bg-dark-950/50 border border-light-200 dark:border-slate-800/80 rounded-2xl px-12 py-3.5 text-sm font-mono text-light-900 dark:text-white outline-none transition-all"
-                      placeholder={editingProvider && formData.api_key.startsWith('***') ? '••••••••' : 'Enter API Key'} />
+                      placeholder={editingProvider && formData.api_key.startsWith('***') ? '••••••••' : 'Nhập API Key'} />
                     <Key size={14} className="absolute left-5 top-1/2 -translate-y-1/2 text-light-400 dark:text-slate-600" />
                   </div>
                 </div>
               </div>
 
               <div className="px-8 py-6 bg-light-50/50 dark:bg-dark-950/40 border-t border-light-100 dark:border-slate-800/60 flex items-center justify-end gap-3">
-                <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-2.5 text-xs font-black uppercase tracking-widest text-light-500 dark:text-slate-400 hover:bg-light-100 dark:hover:bg-dark-800 rounded-xl transition-all">Cancel</button>
+                <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-2.5 text-xs font-black uppercase tracking-widest text-light-500 dark:text-slate-400 hover:bg-light-100 dark:hover:bg-dark-800 rounded-xl transition-all">Hủy</button>
                 <button type="submit" disabled={saving} className="px-8 py-2.5 bg-primary-600 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-primary-500 shadow-lg shadow-primary-500/20 active:scale-95 transition-all">
-                  {saving ? 'Processing...' : 'Secure Authorization'}
+                  {saving ? 'Đang xử lý...' : 'Xác thực bảo mật'}
                 </button>
               </div>
             </form>

@@ -35,9 +35,13 @@ class SkillManager:
         self._registry: List[Dict[str, Any]] = []
         self._loaded_tools: Dict[str, callable] = {}
         self._tool_definitions: str = ""
-        
-        # User-specific skills directory
+        # Global skills directory
         from core.config import DATA_DIR
+        self.global_skills_dir = Path(DATA_DIR) / "skills"
+        self.global_skills_dir.mkdir(parents=True, exist_ok=True)
+        self.global_registry_file = self.global_skills_dir / "skills_registry.json"
+
+        # User-specific skills directory
         self.skills_dir = Path(DATA_DIR) / "users" / str(owner_id) / "skills"
         self.skills_dir.mkdir(parents=True, exist_ok=True)
         self.registry_file = self.skills_dir / "skills_registry.json"
@@ -48,15 +52,30 @@ class SkillManager:
     # ── Registry I/O ──────────────────────────────────────────────
 
     def _load_registry(self):
+        # 1. Load Global Registry
+        global_reg = []
+        if self.global_registry_file.exists():
+            try:
+                with open(self.global_registry_file, "r", encoding="utf-8") as f:
+                    global_reg = json.load(f)
+            except Exception as e:
+                logger.error(f"Failed to load global skills registry: {e}")
+
+        # 2. Load User Registry
+        user_reg = []
         if self.registry_file.exists():
             try:
                 with open(self.registry_file, "r", encoding="utf-8") as f:
-                    self._registry = json.load(f)
+                    user_reg = json.load(f)
             except Exception as e:
-                logger.error(f"Failed to load skills registry for user {self.owner_id}: {e}")
-                self._registry = []
-        else:
-            self._registry = []
+                logger.error(f"Failed to load user skills registry for {self.owner_id}: {e}")
+
+        # 3. Merge (User overrides Global by tool_name)
+        merged = {s["tool_name"]: s for s in global_reg}
+        for s in user_reg:
+            merged[s["tool_name"]] = s
+        
+        self._registry = list(merged.values())
 
     def _save_registry(self):
         with open(self.registry_file, "w", encoding="utf-8") as f:
@@ -69,9 +88,13 @@ class SkillManager:
         if not skill.get("enabled", True):
             return False
 
+        # Try user dir first, then global dir
         skill_file = self.skills_dir / skill["filename"]
         if not skill_file.exists():
-            logger.warning(f"Skill file not found: {skill_file}")
+            skill_file = self.global_skills_dir / skill["filename"]
+            
+        if not skill_file.exists():
+            logger.warning(f"Skill file not found: {skill['filename']}")
             return False
 
         try:

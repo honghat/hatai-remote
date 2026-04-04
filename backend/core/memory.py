@@ -300,6 +300,10 @@ class MemoryManager:
         # Fetch user skills
         from core.skill_manager import SkillManager
         skills = SkillManager.get(self.owner_id).list_skills()
+        
+        # Built-in tools
+        from core.agent_tools import TOOLS
+        default_tool_names = sorted(list(TOOLS.keys()))
 
         return {
             "soul": {"content": soul, "size": len(soul)},
@@ -311,6 +315,7 @@ class MemoryManager:
             "episodes": {"recent": episodes, "total": len(list(self.episodes_dir.glob("*.md")))},
             "preferences": preferences,
             "skills": {"list": skills, "total": len(skills)},
+            "default_tools": default_tool_names
         }
 
     def clear_all_memory(self):
@@ -322,9 +327,7 @@ class MemoryManager:
             self.clear_scratchpad()
             
             # 2. Delete all RAG topics for this user
-            topics = self.list_topics()
-            for t in topics:
-                self.delete_topic(t)
+            self.rag.clear_all_knowledge(user_id=self.owner_id)
             
             # 3. Delete all Episodes for this user
             if self.episodes_dir.exists():

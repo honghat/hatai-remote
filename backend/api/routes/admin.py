@@ -2,7 +2,9 @@
 Admin API Routes — Quản lý Users, Roles, Permissions
 Tất cả endpoints yêu cầu quyền Admin.
 """
+import os
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import Optional
 
@@ -188,3 +190,32 @@ async def clear_activities(admin=Depends(require_admin), db: Session = Depends(g
     db.query(UserActivity).delete()
     db.commit()
     return {"status": "success", "message": "Đã xóa toàn bộ lịch sử"}
+
+# ── Project Documentation (Readme) ──────────────────────
+
+class ReadmeUpdate(BaseModel):
+    content: str
+
+@router.get("/readme", tags=["Admin"])
+async def get_readme(admin=Depends(require_admin)):
+    """Đọc nội dung file Readme.md của dự án."""
+    # admin.py (3 deep) -> routes -> api -> backend -> root
+    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+    readme_path = os.path.join(root_dir, "Readme.md")
+    try:
+        with open(readme_path, "r", encoding="utf-8") as f:
+            return {"content": f.read()}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Không tìm thấy file Readme.md")
+
+@router.post("/readme", tags=["Admin"])
+async def update_readme(data: ReadmeUpdate, admin=Depends(require_admin)):
+    """Cập nhật nội dung file Readme.md."""
+    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+    readme_path = os.path.join(root_dir, "Readme.md")
+    try:
+        with open(readme_path, "w", encoding="utf-8") as f:
+            f.write(data.content)
+        return {"status": "success", "message": "Đã cập nhật tài liệu dự án thành công."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

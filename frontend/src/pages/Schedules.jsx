@@ -174,9 +174,6 @@ export default function Schedules() {
             </div>
             <div>
               <h1 className="text-xl font-extrabold text-light-900 dark:text-white tracking-tight">Tác vụ Định kỳ</h1>
-              <p className="text-xs text-light-400 dark:text-slate-500 mt-0.5 font-bold uppercase tracking-widest">
-                Automated tasks & Cron management
-              </p>
             </div>
           </div>
           <button

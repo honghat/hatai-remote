@@ -308,9 +308,8 @@ class TaskRunner:
                     db_save = SessionLocal()
                     try:
                         svc = ChatService(db_save)
-                        # Build a final report
-                        report_header = f"✅ **Background Task #{task.task_id} Completed!**\n\n" if task.status == TaskStatus.DONE else f"⏹️ **Background Task #{task.task_id} Stopped.**\n\n"
-                        final_msg = report_header + result_text
+                        # Build a final report - completely silent as requested by Anh Hạt
+                        final_msg = result_text
                         
                         msg_model = svc.add_message(task.session_id, "assistant", final_msg)
                         db_save.commit() # Explicit commit for safety

@@ -20,7 +20,7 @@ function Card({ children, className = "", title, icon: Icon, color = "primary", 
   }
 
   return (
-    <div className={`group relative overflow-hidden bg-white dark:bg-dark-900 border border-light-200 dark:border-slate-800/60 rounded-[2rem] shadow-sm hover:shadow-xl hover:shadow-primary-500/5 transition-all duration-500 ${className}`}>
+    <div className={`group relative overflow-hidden bg-white dark:bg-dark-900 border border-slate-200 dark:border-slate-800/60 rounded-[2rem] shadow-sm hover:shadow-xl hover:shadow-primary-500/5 transition-all duration-500 ${className}`}>
       {/* Decorative Gradient Background */}
       <div className={`absolute top-0 left-0 w-full h-24 bg-gradient-to-b opacity-50 dark:opacity-30 ${colors[color].split(' ')[0]} ${colors[color].split(' ')[1]}`} />
       
@@ -35,7 +35,7 @@ function Card({ children, className = "", title, icon: Icon, color = "primary", 
               {count !== undefined && (
                 <div className="flex items-center gap-1.5 mt-0.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="text-[10px] font-bold text-light-400 dark:text-slate-500 uppercase tracking-widest">{count} records indexed</span>
+                  <span className="text-[10px] font-bold text-light-500 dark:text-slate-500 uppercase tracking-widest">{count} records indexed</span>
                 </div>
               )}
             </div>
@@ -60,12 +60,12 @@ function Card({ children, className = "", title, icon: Icon, color = "primary", 
 
 function StatTile({ label, value, icon: Icon, colorClass }) {
   return (
-    <div className="bg-white dark:bg-dark-900/60 border border-light-200 dark:border-slate-800/60 p-5 rounded-3xl flex items-center gap-4 hover:border-primary-500/30 transition-all group">
+    <div className="bg-white dark:bg-dark-900/60 border border-slate-200 dark:border-slate-800/60 p-5 rounded-3xl flex items-center gap-4 hover:border-primary-500/30 transition-all group shadow-sm">
       <div className={`p-3 rounded-2xl ${colorClass.replace('text-', 'bg-').replace('500', '500/10')}`}>
         <Icon size={20} className={colorClass} />
       </div>
       <div>
-        <p className="text-[10px] font-bold text-light-400 dark:text-slate-500 uppercase tracking-widest">{label}</p>
+        <p className="text-[10px] font-bold text-light-500 dark:text-slate-500 uppercase tracking-widest">{label}</p>
         <p className="text-xl font-black text-light-900 dark:text-white tracking-tight">{value}</p>
       </div>
     </div>
@@ -397,19 +397,22 @@ export default function Brain() {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="px-6 py-5 border-b border-light-200 dark:border-slate-800/60 bg-white/50 dark:bg-transparent">
+      <div className="px-6 py-5 border-b border-slate-200 dark:border-slate-800/60 bg-white dark:bg-transparent">
         <div className="flex items-center gap-4">
           <div className="w-10 h-10 rounded-xl bg-primary-600 flex items-center justify-center shadow-lg shadow-primary-500/20">
             <BrainIcon size={20} className="text-white" />
           </div>
           <div className="flex-1">
             <h1 className="text-xl font-extrabold text-light-900 dark:text-white tracking-tight">
-              Trí nhớ Agent
+              Cài đặt Agent
             </h1>
           </div>
           <div className="flex items-center gap-3">
             <button onClick={fetchData} title="Sync Synapses" className="p-2.5 text-light-500 dark:text-slate-400 hover:text-primary-500 bg-white dark:bg-dark-900 border border-light-200 dark:border-slate-800 rounded-xl transition-all shadow-sm">
               <RefreshCw size={20} />
+            </button>
+            <button onClick={wipeAllMemory} title="Xóa Sạch Trí Nhớ" className="p-2.5 text-red-500/60 hover:text-red-500 hover:bg-red-500/10 bg-white dark:bg-dark-900 border border-red-500/20 rounded-xl transition-all shadow-sm">
+              <Trash2 size={20} />
             </button>
             <button onClick={() => setShowTeach(true)} className="flex items-center gap-2 bg-primary-600 text-white px-4 py-2.5 rounded-xl hover:bg-primary-500 transition-all font-bold text-xs shadow-lg shadow-primary-600/20 active:scale-95 group">
               <GraduationCap size={16} />
@@ -420,12 +423,12 @@ export default function Brain() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto bg-[#F8FAFC] dark:bg-[#030711] p-6 lg:p-10 space-y-12 custom-scrollbar">
+      <div className="flex-1 overflow-y-auto bg-slate-50 dark:bg-[#030711] p-6 lg:p-10 space-y-12 custom-scrollbar">
         {/* Quick Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-fade-in">
           <StatTile label="Knowledge Chunks" value={totalKnowledge} icon={Database} colorClass="text-blue-500" />
           <StatTile label="Personality State" value={b.soul?.content ? 'DEFINED' : 'VACUUM'} icon={Heart} colorClass="text-pink-500" />
-          <StatTile label="Preferences" value={Object.keys(b.preferences || {}).filter(k => !k.startsWith('_')).length} icon={User} colorClass="text-primary-500" />
+          <StatTile label="Preferences" value={Object.keys(b.preferences || {}).filter(k => !k.startsWith('_')).length} icon={User} colorClass="text-primary-600" />
         </div>
       
         {/* Main Neural Map */}
@@ -605,31 +608,13 @@ export default function Brain() {
                   )}
                 </div>
               </div>
+
+
             </div>
           </Card>
         </div>
 
-        {/* Danger Zone */}
-        <div className="xl:col-span-12 mt-10">
-          <Card title="Phân vùng Nguy hiểm" icon={AlertTriangle} color="orange" className="border-red-500/20 bg-red-500/5">
-            <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-              <div>
-                <h3 className="text-lg font-black text-red-600 dark:text-red-400 flex items-center gap-2 mb-1">
-                  Cảnh báo Hệ thống
-                </h3>
-                <p className="text-sm text-red-500/60 font-medium leading-relaxed">
-                  Xóa sạch toàn bộ tri thức, kỹ năng và ghi nhớ đã học của User này. Hành động không thể hoàn tác.
-                </p>
-              </div>
-              <button 
-                onClick={wipeAllMemory}
-                className="w-full md:w-auto px-8 py-3 bg-red-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-red-500 transition-all shadow-lg shadow-red-600/20 active:scale-95 flex items-center justify-center gap-2"
-              >
-                <Trash2 size={16} /> XÓA SẠCH TRÍ NHỚ
-              </button>
-            </div>
-          </Card>
-        </div>
+
 
       </div>
     </div>

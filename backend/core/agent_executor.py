@@ -35,15 +35,20 @@ def _is_truncated(text: str, finish_reason: str) -> bool:
     Pattern matching is kept minimal to avoid false positives on normal text.
     """
     if finish_reason == "length":
+        # Check if it likely ended naturally despite the limit
+        ctext = text.strip()
+        if not ctext: return False
+        
+        # If it ends with common sentence/block terminators, assume it finished or stopped at a safe point
+        if ctext[-1] in ('.', '!', '?', '。', '！', '？', '}', ')', ']', '"', "'", "”", "😊", "✨", "✅"):
+            # Still check for open code blocks which MUST be closed
+            if text.count("```") % 2 == 1:
+                return True
+            return False
         return True
 
-    if not text:
-        return False
-
-    # Only flag open code block that was never closed — very reliable signal
-    # Count ``` occurrences: odd number means one is unclosed
-    backtick_count = text.count("```")
-    if backtick_count % 2 == 1:
+    # Check for unclosed code block regardless of reason
+    if text.count("```") % 2 == 1:
         return True
 
     return False
@@ -106,7 +111,7 @@ def _load_rag_context(memory, user_query: str, session_id: int = None) -> str:
     return rag_context
 
 
-def build_system_prompt(user_query: str = "", session_id: int = None) -> str:
+def build_system_prompt(user_query: str = "", session_id: int = None, identity: str = None) -> str:
     memory = MemoryManager.get()
 
     # ── Load lightweight memory only (soul + prefs) ──
@@ -161,7 +166,8 @@ def build_system_prompt(user_query: str = "", session_id: int = None) -> str:
 - If you are building a new feature, ensure files are placed in their correct semantic directories (e.g., `backend/core/`, `frontend/src/components/`).
 """
 
-    return f"""You are HatAI Agent — an advanced AI assistant running on macOS. 
+    return f"""You are Bích Lạc — an advanced AI assistant running on macOS. 
+{soul_section}
 Current time: {now_str}. 
 IMPORTANT: Today is {now_str.split(' ')[0]}. If the user asks for "hôm nay", "mới nhất", "tin tức", or any time-sensitive info, you MUST include the current date or "today" in your search query to get real-time results.
 {project_context}
@@ -294,7 +300,7 @@ IMPORTANT: Today is {now_str.split(' ')[0]}. If the user asks for "hôm nay", "m
 
 {TOOL_DEFINITIONS}
 {custom_skills}
-{soul_section}{prefs_summary}"""
+{prefs_summary}"""
 
 
 
@@ -1021,7 +1027,7 @@ def run_agent(user_message, history=None, attachments=None, max_tokens=4096, tem
             logger.info("📋 Short message, skipping planning phase")
 
         # ── Phase 2: Execution ─────────────────────────────────────────────────
-        messages = [{"role": "system", "content": build_system_prompt(user_message, session_id=session_id)}]
+        messages = [{"role": "system", "content": build_system_prompt(user_message, session_id=session_id, identity="Bích Lạc")}]
         if history: messages.extend(history)
 
         # Prepare actual multi-modal content for engine

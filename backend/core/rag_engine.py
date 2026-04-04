@@ -407,9 +407,9 @@ class RAGEngine:
         col_name = f"u{user_id}_{clean_topic}"[:63]
 
         try:
-            self.client.delete_collection(name=clean_topic)
-            if clean_topic in self.collections:
-                del self.collections[clean_topic]
+            self.client.delete_collection(name=col_name)
+            if col_name in self.collections:
+                del self.collections[col_name]
             return {"message": f"Successfully deleted topic '{topic}' and all its associated data."}
         except Exception as e:
             logger.error(f"Error deleting topic: {e}")
@@ -417,17 +417,23 @@ class RAGEngine:
                 return {"message": f"Topic '{topic}' was not found or already deleted."}
             return {"error": str(e)}
 
-    def clear_all_knowledge(self) -> Dict[str, Any]:
-        """Delete all collections in the RAG database."""
+    def clear_all_knowledge(self, user_id: int = 1) -> Dict[str, Any]:
+        """Delete all collections in the RAG database for a specific user."""
         if not self.enabled:
             return {"error": "RAG engine is not installed/enabled"}
 
         try:
-            topics = self.list_topics()
-            for topic in topics:
-                self.client.delete_collection(name=topic)
-            self.collections = {}
-            return {"message": f"Successfully cleared all {len(topics)} knowledge topics. The brain is now fresh!"}
+            prefix = f"u{user_id}_"
+            cols = self.client.list_collections()
+            count = 0
+            for col in cols:
+                cname = getattr(col, 'name', str(col))
+                if cname.startswith(prefix):
+                    self.client.delete_collection(name=cname)
+                    if cname in self.collections:
+                        del self.collections[cname]
+                    count += 1
+            return {"message": f"Successfully cleared all {count} knowledge topics for user {user_id}."}
         except Exception as e:
             logger.error(f"Error clearing knowledge: {e}")
             return {"error": str(e)}

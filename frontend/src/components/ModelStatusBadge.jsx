@@ -91,10 +91,10 @@ export default function ModelStatusBadge({ isCollapsed }) {
     <div className="relative mb-4 px-1" ref={dropdownRef}>
       {!isCollapsed && (
         <div className="flex items-center justify-between mb-2 px-2">
-          <span className="text-[10px] uppercase tracking-[0.15em] font-black text-light-500 dark:text-slate-500/80 uppercase tracking-widest">Intelligence Engine</span>
+          <span className="text-[10px] uppercase tracking-[0.15em] font-black text-light-500 dark:text-slate-500/80 uppercase tracking-widest">Bộ não trí tuệ</span>
           {switching && (
             <div className="flex items-center gap-1.5 animate-pulse">
-              <span className="text-[9px] font-bold text-primary-600 dark:text-primary-500 uppercase">Processing...</span>
+              <span className="text-[9px] font-bold text-primary-600 dark:text-primary-500 uppercase">Đang xử lý...</span>
               <Loader2 size={10} className="animate-spin text-primary-600 dark:text-primary-500" />
             </div>
           )}
@@ -136,7 +136,7 @@ export default function ModelStatusBadge({ isCollapsed }) {
             <p className="text-sm font-black text-light-900 dark:text-white tracking-tight leading-none mb-1 truncate">{currentModelName}</p>
             <div className="flex items-center gap-1.5">
               <span className={`text-[10px] font-bold uppercase tracking-wider ${isReady ? 'text-emerald-600/90 dark:text-emerald-400/80' : isLoading ? 'text-yellow-600/90 dark:text-yellow-400/80' : 'text-red-600/90 dark:text-red-400/80'}`}>
-                {isReady ? 'Engine Active' : isLoading ? 'Warming Up' : 'Engine Idle'}
+                {isReady ? 'Đang hoạt động' : isLoading ? 'Đang khởi động' : 'Tạm nghỉ'}
               </span>
             </div>
           </div>
@@ -167,10 +167,10 @@ export default function ModelStatusBadge({ isCollapsed }) {
               </div>
               <div className="flex-1 text-left min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className={`text-sm font-bold tracking-tight ${isLocal ? 'text-primary-700 dark:text-primary-400' : 'text-light-700 dark:text-slate-300 group-hover:text-light-900 dark:group-hover:text-white'}`}>Local Qwen3</span>
+                  <span className={`text-sm font-bold tracking-tight ${isLocal ? 'text-primary-700 dark:text-primary-400' : 'text-light-700 dark:text-slate-300 group-hover:text-light-900 dark:group-hover:text-white'}`}>Qwen3 Nội bộ</span>
                   {isLocal && <div className="h-1.5 w-1.5 rounded-full bg-primary-500 animate-pulse" />}
                 </div>
-                <p className="text-[10px] text-light-500 dark:text-slate-500 group-hover:text-light-600 dark:group-hover:text-slate-400 truncate">Private & ultra-fast (Metal GPU)</p>
+                <p className="text-[10px] text-light-500 dark:text-slate-500 group-hover:text-light-600 dark:group-hover:text-slate-400 truncate">Riêng tư & siêu nhanh (Metal GPU)</p>
               </div>
               {isLocal && <CheckCircle2 size={16} className="text-primary-600 dark:text-primary-500 flex-shrink-0" />}
             </button>
@@ -197,13 +197,13 @@ export default function ModelStatusBadge({ isCollapsed }) {
                         onChange={e => setModelValue(e.target.value)}
                         onKeyDown={e => e.key === 'Enter' && handleUpdateModel('gemini', modelValue)}
                         autoFocus
-                        placeholder="Model name..."
+                        placeholder="Tên mô hình..."
                       />
                       <button 
                         onClick={() => handleUpdateModel('gemini', modelValue)}
                         className="p-1 px-2 bg-purple-600 text-white rounded-lg text-[10px] font-bold"
                       >
-                        Apply
+                        Áp dụng
                       </button>
                     </div>
                   ) : (
@@ -246,13 +246,13 @@ export default function ModelStatusBadge({ isCollapsed }) {
                         onChange={e => setModelValue(e.target.value)}
                         onKeyDown={e => e.key === 'Enter' && handleUpdateModel('ollama', modelValue)}
                         autoFocus
-                        placeholder="Model name..."
+                        placeholder="Tên mô hình..."
                       />
                       <button 
                         onClick={() => handleUpdateModel('ollama', modelValue)}
                         className="p-1 px-2 bg-emerald-600 text-white rounded-lg text-[10px] font-bold"
                       >
-                        Apply
+                        Áp dụng
                       </button>
                     </div>
                   ) : (
@@ -301,7 +301,7 @@ export default function ModelStatusBadge({ isCollapsed }) {
                         onClick={() => handleUpdateModel('openai', modelValue)}
                         className="p-1 px-2 bg-blue-600 text-white rounded-lg text-[10px] font-bold"
                       >
-                        Apply
+                        Áp dụng
                       </button>
                     </div>
                   ) : (
@@ -325,7 +325,7 @@ export default function ModelStatusBadge({ isCollapsed }) {
           
           <div className="mt-2 pt-2 border-t border-light-200 dark:border-slate-800/60 text-center">
              <p className="text-[9px] uppercase tracking-[0.2em] text-light-400 dark:text-slate-500/60 font-black">
-               Switch Engine Mode
+               Chế độ chuyển đổi bộ não
              </p>
           </div>
         </div>

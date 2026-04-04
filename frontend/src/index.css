@@ -20,9 +20,9 @@
 
   /* Light mode override (only when explicitly chosen) */
   html:not(.dark) body {
-    @apply bg-light-50 text-light-900;
-    background-image: radial-gradient(ellipse at 20% 50%, rgba(99, 102, 241, 0.03) 0%, transparent 50%),
-                      radial-gradient(ellipse at 80% 20%, rgba(79, 70, 229, 0.03) 0%, transparent 50%);
+    @apply bg-white text-slate-900;
+    background-image: radial-gradient(ellipse at 20% 50%, rgba(99, 102, 241, 0.04) 0%, transparent 50%),
+                      radial-gradient(ellipse at 80% 20%, rgba(79, 70, 229, 0.04) 0%, transparent 50%);
   }
 
   /* GPU-accelerated smooth scrolling containers */
@@ -80,13 +80,14 @@
   }
 
   .chat-bubble-user {
-    @apply bg-primary-600/20 border border-primary-500/20 rounded-2xl rounded-tr-sm px-4 py-3;
+    @apply bg-primary-50 dark:bg-primary-600/20 border border-primary-200 dark:border-primary-500/20 rounded-2xl rounded-tr-sm px-5 py-4;
     overflow-wrap: anywhere;
     word-break: break-word;
+    @apply shadow-sm;
   }
 
   .chat-bubble-ai {
-    @apply bg-white dark:bg-dark-900 border border-light-200 dark:border-white/10 rounded-2xl rounded-tl-sm px-5 py-4
+    @apply bg-white dark:bg-dark-900 border border-slate-200 dark:border-white/10 rounded-2xl rounded-tl-sm px-5 py-4
            shadow-sm dark:shadow-[0_0_40px_-15px_rgba(99,102,241,0.1)];
     overflow-wrap: anywhere;
     word-break: break-word;

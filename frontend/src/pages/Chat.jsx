@@ -291,7 +291,7 @@ function ThinkingBlock({ thinking, isStreaming, isThinkingComplete }) {
             </div>
           </div>
           <div className="flex flex-col items-start leading-tight">
-            <span className="text-[10px] font-black uppercase tracking-[0.15em] opacity-60">Neural Process</span>
+            <span className="text-[10px] font-black uppercase tracking-[0.15em] opacity-60">Lộ trình suy nghĩ</span>
             <span className="text-[11px] font-bold">
               {isStreaming && !isThinkingComplete ? 'Đang phân tích dữ liệu...' : 'Lộ trình suy nghĩ'}
             </span>
@@ -370,7 +370,7 @@ const ChatMarkdown = memo(function ChatMarkdown({ content }) {
   const copyCode = (code) => { navigator.clipboard.writeText(code); setCopied(code); setTimeout(() => setCopied(''), 2000) }
 
   return (
-    <ReactMarkdown className="chat-markdown-content text-sm leading-relaxed font-medium"
+    <ReactMarkdown className="chat-markdown-content text-sm leading-relaxed font-medium break-words overflow-hidden"
       remarkPlugins={[remarkGfm]}
       components={{
         p: ({ children }) => {
@@ -821,7 +821,7 @@ function AgentMessage({ events, isStreaming }) {
   }, [events, isStreaming])
 
   return (
-    <div className="flex-1 min-w-0 space-y-4 pt-1">
+    <div className="flex-1 min-w-0 space-y-4 pt-1 break-words overflow-hidden">
       {(thinkingContent || (isStreaming && isThinkingStreaming)) && (
         <ThinkingBlock
           thinking={thinkingContent}
@@ -1306,10 +1306,10 @@ export default function Chat() {
       `}>
         <div className="p-4 border-b border-light-200 dark:border-slate-800/50 flex items-center justify-between">
           <button id="new-chat-btn" onClick={() => { handleNewChat(); setChatSidebarOpen(false); }}
-            className="flex-1 justify-center text-sm py-2.5 flex items-center gap-2 font-black uppercase tracking-widest rounded-xl
+            className="flex-1 justify-center text-xs py-3 flex items-center gap-2 font-black uppercase tracking-wider rounded-lg
               bg-primary-600 hover:bg-primary-500 text-white shadow-lg shadow-primary-600/10 transition-all active:scale-95"
           >
-            <Plus size={16} /> New Session
+            <Plus size={14} /> Cuộc hội thoại mới
           </button>
           <button onClick={() => setChatSidebarOpen(false)} className="p-2 text-light-400 dark:text-slate-500 md:hidden ml-2 hover:bg-light-100 dark:hover:bg-dark-900 rounded-lg transition-colors">
             <X size={20} />
@@ -1321,7 +1321,7 @@ export default function Chat() {
               onSelect={(id) => { handleSelectSession(id); setChatSidebarOpen(false); }}
               onDelete={handleDeleteSession} onRename={handleRenameSession} />
           ))}
-          {sessions.length === 0 && <p className="text-center text-light-400 dark:text-slate-600 text-[10px] py-10 font-black uppercase tracking-widest opacity-40">No sessions found</p>}
+          {sessions.length === 0 && <p className="text-center text-light-700 dark:text-slate-500 text-[10px] py-10 font-bold uppercase tracking-widest opacity-60">Không tìm thấy phiên nào</p>}
         </div>
       </div>
 
@@ -1395,23 +1395,20 @@ export default function Chat() {
         {/* Messages Container */}
         <div className="flex-1 overflow-y-auto custom-scrollbar scroll-smooth">
           {agentEvents.length === 0 ? (
-            <div className="flex flex-col items-center justify-center min-h-full py-20 px-6 animate-fade-in text-center">
-              <div className="w-16 h-16 rounded-2xl bg-white dark:bg-dark-900 border border-light-200 dark:border-slate-800 shadow-2xl flex items-center justify-center mb-8 transform hover:scale-105 transition-transform duration-150">
-                <Bot size={32} className="text-primary-500" />
-              </div>
-              <div className="flex flex-col gap-6 w-full max-w-2xl">
+            <div className="flex flex-col items-center justify-start min-h-full pt-48 pb-20 px-6 animate-fade-in text-center">
+              <div className="flex flex-col gap-4 w-full max-w-2xl">
                 <div className="flex items-center justify-between px-2">
-                  <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-light-400 dark:text-slate-600">Quick Actions</h2>
+                  <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-light-500 dark:text-slate-600">Gợi ý nhanh</h2>
                   {!editingQuickPrompts ? (
-                    <button onClick={() => setEditingQuickPrompts(true)} className="text-[10px] font-bold text-primary-500 hover:text-primary-400 transition-colors">Edit Suggestions</button>
+                    <button onClick={() => setEditingQuickPrompts(true)} className="text-[10px] font-bold text-primary-500 hover:text-primary-400 transition-colors">Sửa gợi ý</button>
                   ) : (
                     <div className="flex gap-4">
-                      <button onClick={handleCancelQuickPrompts} className="text-[10px] font-bold text-light-500 hover:text-light-400 transition-colors">Cancel</button>
-                      <button onClick={handleSaveQuickPrompts} className="text-[10px] font-bold text-emerald-500 hover:text-emerald-400 transition-colors">Save Changes</button>
+                      <button onClick={handleCancelQuickPrompts} className="text-[10px] font-bold text-light-500 hover:text-light-400 transition-colors">Hủy</button>
+                      <button onClick={handleSaveQuickPrompts} className="text-[10px] font-bold text-emerald-500 hover:text-emerald-400 transition-colors">Lưu</button>
                     </div>
                   )}
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {(editingQuickPrompts ? tempQuickPrompts : quickPrompts).map((prompt, idx) => (
                     <div key={idx} className="relative group">
                       {editingQuickPrompts ? (
@@ -1422,7 +1419,7 @@ export default function Chat() {
                             next[idx] = e.target.value
                             setTempQuickPrompts(next)
                           }}
-                          className="w-full bg-white dark:bg-dark-900 border-2 border-primary-500/30 rounded-[24px] px-7 py-5 text-sm font-bold text-light-800 dark:text-slate-200 outline-none focus:border-primary-500"
+                          className="w-full bg-white dark:bg-dark-900 border-2 border-primary-500/30 rounded-2xl px-4 py-2.5 text-xs font-bold text-light-800 dark:text-slate-200 outline-none focus:border-primary-500"
                         />
                       ) : (
                         <button onClick={() => {
@@ -1430,10 +1427,10 @@ export default function Chat() {
                           const clean = prompt.match(/^([^\w\s]{1,3})?\s*(.*)/)?.[2] || prompt
                           setInput(clean.trim())
                         }}
-                          className="w-full flex items-center gap-4 bg-white dark:bg-dark-900/40 hover:bg-light-100 dark:hover:bg-dark-800 border border-light-200 dark:border-slate-800/60 
-                            rounded-[24px] px-7 py-5 text-sm font-bold text-light-800 dark:text-slate-200 transition-all duration-150 shadow-sm active:scale-[0.98] text-left group"
+                          className="w-full flex items-center gap-3 bg-white dark:bg-dark-900/40 hover:bg-light-100 dark:hover:bg-dark-800 border border-slate-200 dark:border-slate-800/60 
+                            rounded-2xl px-5 py-3 text-xs font-bold text-light-800 dark:text-slate-200 transition-all duration-150 shadow-sm active:scale-[0.98] text-left group"
                         >
-                          <span className="text-2xl transition-transform group-hover:scale-125 duration-150 flex-shrink-0">{prompt.match(/^([^\w\s]{1,3})/) ? prompt.match(/^([^\w\s]{1,3})/)[0] : '✨'}</span>
+                          <span className="text-lg transition-transform group-hover:scale-110 duration-150 flex-shrink-0">{prompt.match(/^([^\w\s]{1,3})/) ? prompt.match(/^([^\w\s]{1,3})/)[0] : '✨'}</span>
                           <span className="truncate flex-1 min-w-0 opacity-70 group-hover:opacity-100 transition-opacity">
                             {prompt.match(/^([^\w\s]{1,3})?\r?\n?\s*(.*)/)?.[2] || prompt}
                           </span>
@@ -1492,9 +1489,9 @@ export default function Chat() {
         </div>
 
         {/* Floating Input Dock */}
-        <div className="px-6 md:px-12 pb-10 pt-2 bg-gradient-to-t from-white via-white dark:from-dark-950 dark:via-dark-950 to-transparent">
-          <div className="max-w-4xl mx-auto relative">
-            <div className="relative flex flex-col bg-white dark:bg-dark-900 border border-light-200 dark:border-slate-800/60 rounded-[32px] shadow-2xl transition-all duration-150 focus-within:ring-4 focus-within:ring-primary-500/10 focus-within:border-primary-500/40">
+        <div className="px-6 md:px-12 pb-8 pt-2 bg-gradient-to-t from-white via-white dark:from-dark-950 dark:via-dark-950 to-transparent">
+          <div className="max-w-3xl mx-auto relative">
+            <div className="relative flex flex-col bg-white dark:bg-dark-900 border border-slate-200 dark:border-slate-800/60 rounded-3xl shadow-xl transition-all duration-150 focus-within:ring-4 focus-within:ring-primary-500/10 focus-within:border-primary-500/40">
               {attachments.length > 0 && (
                 <div className="flex gap-4 px-8 pt-6 overflow-x-auto custom-scrollbar-h pb-2">
                   {attachments.map((file, idx) => (
@@ -1511,21 +1508,21 @@ export default function Chat() {
                 ref={textareaRef}
                 rows={1}
                 value={input}
-                onChange={e => { setInput(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 220) + 'px' }}
+                onChange={e => { setInput(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 180) + 'px' }}
                 onKeyDown={handleKeyDown}
-                placeholder="Talk to HatAI..."
-                className="w-full px-8 py-7 bg-transparent outline-none text-base md:text-lg text-light-900 dark:text-white placeholder-light-400 dark:placeholder-slate-600 resize-none max-h-60 custom-scrollbar font-medium"
+                placeholder="Nhắn với Bích Lạc..."
+                className="w-full px-6 py-4 bg-transparent outline-none text-sm md:text-base text-slate-800 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 resize-none max-h-52 custom-scrollbar font-medium"
                 style={{ height: 'auto' }}
               />
 
-              <div className="flex items-center justify-between px-8 pb-6">
+              <div className="flex items-center justify-between px-6 pb-4">
                 <div className="flex items-center gap-3 relative">
                   <input type="file" id="chat-media-upload" className="hidden" onChange={handleFileUpload} accept="image/*,application/pdf" />
                   
                   {/* Elite Context Trigger */}
                   <button 
                     onClick={(e) => { e.stopPropagation(); setIsContextOpen(!isContextOpen); }} 
-                    className={`group/plus w-11 h-11 flex items-center justify-center rounded-2xl transition-all duration-500 active:scale-95 border ${
+                    className={`group/plus w-10 h-10 flex items-center justify-center rounded-xl transition-all duration-500 active:scale-95 border ${
                       isContextOpen 
                         ? 'bg-primary-600 border-primary-400 text-white shadow-[0_0_20px_rgba(59,130,246,0.5)]' 
                         : 'bg-white/5 border-white/10 text-slate-500 hover:text-white hover:bg-white/10 hover:border-white/20'
@@ -1546,7 +1543,7 @@ export default function Chat() {
                         <div className="absolute inset-0 bg-gradient-to-br from-primary-500/10 via-transparent to-transparent opacity-50 pointer-events-none" />
                         <div className="relative z-10">
                           <div className="px-5 py-3 flex items-center justify-between border-b border-white/5 mb-2">
-                            <span className="text-[10px] font-black uppercase tracking-[0.25em] text-primary-500">Neural Context</span>
+                            <span className="text-[10px] font-black uppercase tracking-[0.25em] text-primary-500">Phân tích bối cảnh</span>
                             <div className="w-1.5 h-1.5 rounded-full bg-primary-500 animate-pulse" />
                           </div>
                           
@@ -1556,20 +1553,11 @@ export default function Chat() {
                                 <ImageIcon size={20} className="text-orange-500" />
                               </div>
                               <div className="flex flex-col items-start leading-tight">
-                                <span className="text-[14px] font-bold">Media & Files</span>
-                                <span className="text-[10px] opacity-40 font-medium">Analyze images or documents</span>
+                                <span className="text-[14px] font-bold">Media & Tệp</span>
+                                <span className="text-[10px] opacity-40 font-medium">Đính kèm hình ảnh & tài liệu</span>
                               </div>
                             </button>
 
-                            <button onClick={() => { setIsContextOpen(false); setInput(p => p + '@'); textareaRef.current.focus(); }} className="w-full group/item flex items-center gap-4 px-4 py-3.5 rounded-[24px] hover:bg-white/5 transition-all duration-300 text-slate-400 hover:text-white">
-                              <div className="w-10 h-10 rounded-2xl bg-primary-500/10 flex items-center justify-center group-hover/item:scale-110 transition-transform duration-300">
-                                <AtSign size={20} className="text-primary-500" />
-                              </div>
-                              <div className="flex flex-col items-start leading-tight">
-                                <span className="text-[14px] font-bold">Mentions</span>
-                                <span className="text-[10px] opacity-40 font-medium">Reference specific modules</span>
-                              </div>
-                            </button>
 
                           </div>
                         </div>
@@ -1577,9 +1565,6 @@ export default function Chat() {
                     </>
                   )}
 
-                  <div className="hidden md:flex items-center gap-2.5 px-4 py-2 bg-emerald-500/5 border border-emerald-500/10 rounded-2xl">
-                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  </div>
                 </div>
 
                 {streaming ? (
@@ -1589,21 +1574,15 @@ export default function Chat() {
                   </button>
                 ) : (
                   <div className="flex items-center gap-3">
-                    <button onClick={handleCreateTask} disabled={!input.trim() && attachments.length === 0}
-                      title="Chạy ngầm (Background Task)"
-                      className="flex-shrink-0 w-11 h-11 md:w-13 md:h-13 rounded-2xl bg-white/5 text-slate-400 border border-white/10 hover:bg-primary-500 hover:text-white hover:border-primary-400 flex items-center justify-center transition-all duration-300 disabled:opacity-20 disabled:grayscale active:scale-90">
-                      <Zap size={22} className={(input.trim() || attachments.length > 0) ? "animate-in zoom-in-50 duration-150" : ""} />
-                    </button>
                     <button onClick={handleSend} disabled={!input.trim() && attachments.length === 0}
                       title="Gửi câu hỏi"
-                      className="flex-shrink-0 w-11 h-11 md:w-13 md:h-13 rounded-2xl bg-primary-600 text-white shadow-[0_10px_30px_rgba(37,99,235,0.3)] hover:bg-primary-500 hover:scale-105 flex items-center justify-center transition-all duration-300 disabled:opacity-20 disabled:grayscale disabled:scale-95 disabled:shadow-none active:scale-90">
-                      <Send size={24} fill="currentColor" className={(input.trim() || attachments.length > 0) ? "animate-in zoom-in-50 duration-150" : ""} />
+                      className="flex-shrink-0 w-10 h-10 md:w-12 md:h-12 rounded-xl bg-primary-600 text-white shadow-[0_10px_30px_rgba(37,99,235,0.3)] hover:bg-primary-500 hover:scale-105 flex items-center justify-center transition-all duration-300 disabled:opacity-20 disabled:grayscale disabled:scale-95 disabled:shadow-none active:scale-90">
+                      <Send size={20} fill="currentColor" className={(input.trim() || attachments.length > 0) ? "animate-in zoom-in-50 duration-150" : ""} />
                     </button>
                   </div>
                 )}
               </div>
             </div>
-            <p className="text-center text-[9px] text-light-500 dark:text-slate-500 mt-5 font-black uppercase tracking-[0.2em] opacity-40">HatAI Agent Powered by Advanced Reasoning Engine</p>
           </div>
         </div>
       </div>
