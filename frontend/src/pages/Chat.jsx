@@ -1366,9 +1366,9 @@ export default function Chat() {
                   <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${daemon.connected ? 'bg-emerald-400' : 'bg-red-400'} opacity-75`}></span>
                   <span className={`relative inline-flex rounded-full h-2 w-2 ${daemon.connected ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
                 </span>
-                HatAI Smart Agent
+                Smart Agent
               </p>
-              <div title={daemon.connected ? 'Neural Link Active' : 'Offline'}
+              <div title={daemon.connected ? 'Connected' : 'Offline'}
                 className={`p-1.5 rounded-lg border transition-all ${daemon.connected ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500' : 'bg-light-100 dark:bg-dark-900 border-light-200 dark:border-slate-800 text-light-400 dark:text-dark-400'}`}>
                 {daemon.connected ? <Wifi size={14} /> : <WifiOff size={14} />}
               </div>

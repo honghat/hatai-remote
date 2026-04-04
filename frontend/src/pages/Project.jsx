@@ -1088,7 +1088,6 @@ export default function Project() {
                 <div className="flex px-4 py-1.5 gap-2 border-t border-light-100 dark:border-slate-800/20 overflow-x-auto no-scrollbar bg-white/50 dark:bg-black/10">
                     {[
                         { id: 'explorer', icon: FileCode, label: 'Files' },
-                        { id: 'search', icon: Search, label: 'Search' },
                         { id: 'history', icon: History, label: 'History' },
                         { id: 'git', icon: GitBranch, label: 'Source' }
                     ].map(v => (
@@ -1107,7 +1106,6 @@ export default function Project() {
             {/* Activity Bar - DESKTOP ONLY */}
             <div className={`hidden md:flex w-14 flex-col items-center py-6 border-r transition-colors z-50 ${isDark ? 'bg-[#0a0a0c] border-white/5' : 'bg-white border-black/[0.05]'}`}>
                 <div onClick={() => { setActiveSidebarView('explorer'); setMobileExplorerOpen(true); }} className={`p-3 cursor-pointer rounded-xl mb-4 transition-all ${activeSidebarView === 'explorer' ? 'bg-primary-600 text-white shadow-lg shadow-primary-900/30' : 'text-slate-500 hover:bg-slate-500/10'}`} title="Explorer"><FileCode size={20} /></div>
-                <div onClick={() => { setActiveSidebarView('search'); setMobileExplorerOpen(true); }} className={`p-3 cursor-pointer rounded-xl mb-4 transition-all ${activeSidebarView === 'search' ? 'bg-primary-600 text-white shadow-lg shadow-primary-900/30' : 'text-slate-500 hover:bg-slate-500/10'}`} title="Search"><Search size={20} /></div>
                 <div onClick={() => { setActiveSidebarView('history'); setMobileExplorerOpen(true); }} className={`p-3 cursor-pointer rounded-xl mb-4 transition-all ${activeSidebarView === 'history' ? 'bg-primary-600 text-white shadow-lg shadow-primary-900/30' : 'text-slate-500 hover:bg-slate-500/10'}`} title="Collaboration History"><History size={20} /></div>
                 <div onClick={() => { setActiveSidebarView('git'); setMobileExplorerOpen(true); }} className={`p-3 cursor-pointer rounded-xl transition-all ${activeSidebarView === 'git' ? 'bg-primary-600 text-white shadow-lg shadow-primary-900/30' : 'text-slate-500 hover:bg-slate-500/10'}`} title="Source Control"><GitBranch size={20} /></div>
             </div>
@@ -1129,16 +1127,6 @@ export default function Project() {
                         <div className="p-6 pb-2 flex items-center justify-between"><span className="text-[10px] font-black uppercase tracking-[0.3em] opacity-30">Explorer</span><div className="flex gap-2"><button onClick={fetchFiles} className="opacity-30 hover:opacity-100"><RotateCcw size={14}/></button></div></div>
                         <div className="px-5 py-2"><input className={`w-full bg-black/5 dark:bg-white/5 border-none rounded-lg px-3 py-2 text-[12px] outline-none placeholder:opacity-20`} placeholder="Filter files..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} /></div>
                         <div className="flex-1 overflow-auto py-2 group custom-scrollbar">{renderTree(fileTree)}</div>
-                    </>
-                ) : activeSidebarView === 'search' ? (
-                    <>
-                        <div className="p-6 pb-2 text-[10px] font-black uppercase tracking-[0.3em] opacity-30">Global Search</div>
-                        <div className="px-5 py-2"><div className="relative"><Search className="absolute left-3 top-2.5 opacity-20" size={14} /><input className={`w-full bg-black/5 dark:bg-white/5 border-none rounded-lg pl-10 pr-3 py-2.5 text-[12px] outline-none placeholder:opacity-40`} placeholder="Find in files..." value={contentSearch} onChange={(e) => setContentSearch(e.target.value)} /></div></div>
-                        <div className="flex-1 overflow-auto py-4 px-5 space-y-4 custom-scrollbar">
-                            {contentResults.length > 0 ? contentResults.map(f => (
-                                <div key={f.path} onClick={() => { handleOpenFile(f.path); setMobileExplorerOpen(false); }} className={`p-4 rounded-2xl border cursor-pointer transition-all ${isDark ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-white/60 border-black/5 hover:bg-white'}`}><p className="text-[12px] font-black text-primary-500 mb-2 truncate">{f.name}</p><p className="text-[10px] opacity-40 mb-3 truncate">{f.path}</p><div className="text-[11px] opacity-60 font-mono line-clamp-2 italic">...{f.content?.substring(f.content.toLowerCase().indexOf(contentSearch.toLowerCase()), f.content.toLowerCase().indexOf(contentSearch.toLowerCase()) + 100)}...</div></div>
-                            )) : contentSearch.length > 2 && <p className="text-center opacity-20 text-[12px] mt-10">No results found</p>}
-                        </div>
                     </>
                 ) : activeSidebarView === 'history' ? (
                     <>
